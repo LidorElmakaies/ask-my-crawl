@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\lidor\\\\Desktop\\\\webscraper\\\\devops\\\\data\\\\loki\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\lidor\\\\Desktop\\\\webscraper\\\\devops\\\\data\\\\prometheus\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\lidor\\\\Desktop\\\\webscraper\\\\devops\\\\data\\\\tempo\")",
+      "PowerShell(New-Item -ItemType Directory -Force \"c:\\\\Users\\\\lidor\\\\Desktop\\\\webscraper\\\\devops\\\\data\\\\grafana\")",
+      "PowerShell(docker inspect devops-loki-1 --format '{{range .Mounts}}Type={{.Type}} Src={{.Source}} Dst={{.Destination}}{{\"\\\\n\"}}{{end}}' 2>&1)",
+      "PowerShell(docker inspect devops-loki-1 --format '{{.HostConfig.LogConfig.Type}} max-size={{index .HostConfig.LogConfig.Config \"max-size\"}}' 2>&1)",
+      "PowerShell(python -c \"import sys,json; d=json.load\\(sys.stdin\\)[0]; [print\\('Mount:', m['Type'], m['Source'], '->', m['Destination']\\) for m in d['Mounts']]; lc=d['HostConfig']['LogConfig']; print\\('Logging:', lc['Type'], lc['Config']\\)\" 2>&1)"
+    ]
+  }
+}
