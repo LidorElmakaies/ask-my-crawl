@@ -81,6 +81,7 @@ Order matters — do not reorder providers.
 ## Key Conventions
 
 - **Always use `useAppTheme()`** for colors, never hardcode or reference `colors.js` directly in components.
+- **Build shared UI as components in `src/components/`, not duplicated per-screen markup** — e.g. a single reusable input-field component used by the URL/query submission screen, register, and login, rather than each screen hand-rolling its own `TextInput`. See [../.claude/agents/frontend.md](../.claude/agents/frontend.md)'s "Build for reuse" section.
 - **Scraper state is ephemeral** — do not add persistence to `scraperSlice`.
 - **Theme persistence is automatic** — `redux-persist` handles it; do not manually write to AsyncStorage.
 - Tab icons follow the `<name>-outline` / `<name>` Ionicons pattern for inactive/active states.
