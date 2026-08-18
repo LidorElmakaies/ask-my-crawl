@@ -51,10 +51,14 @@ table read/write.
 
 ## Auth Service
 
+**Implemented** (`backend/apps/auth`) — runs standalone on port 8001 today; the Gateway proxy
+wiring below is the next piece of work, not yet done.
+
 - **Owns**: `users`, `refresh_tokens`.
 - **Responsibilities**: registration (hash password per `auth.md`), login, refresh-token issuance +
-  rotation + revocation, admin user CRUD.
-- **Talks to**: Postgres only. No Kafka involvement.
+  rotation + revocation, self-service profile read/update (`/me`), admin user CRUD, first-admin
+  bootstrap (env-based auto-seed on startup).
+- **Talks to**: Postgres (via TypeORM) only. No Kafka involvement.
 
 ## Crawl Worker (pool)
 
@@ -105,8 +109,9 @@ table read/write.
 
 ## Internal (service-to-service) calls
 
-Not yet decided: plain HTTP within the cluster vs NestJS's TCP microservice transport for the
-synchronous internal calls listed above (Gateway↔Auth, Gateway↔Crawl Result Manager, Crawl
-Worker↔Search Result Manager, Query/Answer↔Search Result Manager, Notification↔Auth). Both are
-supported natively by NestJS; pick one convention and use it everywhere rather than mixing — TBD
-for the devops/AGENTS.md pass.
+**Resolved: plain HTTP**, via Nest's `HttpModule`, for every synchronous internal call listed above
+(Gateway↔Auth, Gateway↔Crawl Result Manager, Crawl Worker↔Search Result Manager,
+Query/Answer↔Search Result Manager, Notification↔Auth) — not NestJS's TCP microservice transport.
+Simpler, and each callee's controllers already implement the relevant `api-contracts.md` paths
+directly, so the caller (e.g. Gateway) is a thin proxy rather than a translation layer. Not yet
+wired for Auth Service specifically — Gateway calling it via HTTP is the next piece of work.

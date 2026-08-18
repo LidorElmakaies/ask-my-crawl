@@ -1,17 +1,11 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
-import { URLS } from '../../config/urls';
+import * as scraperService from '../../services/scraperService';
 
 export const submitScrapeRequest = createAsyncThunk(
   'scraper/submit',
   async (url, { rejectWithValue }) => {
     try {
-      const response = await fetch(URLS.gateway.scrape, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      return await scraperService.submitScrapeRequest(url);
     } catch (err) {
       return rejectWithValue(err.message);
     }

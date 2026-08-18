@@ -24,7 +24,10 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
 - **Message bus**: Kafka (via `@nestjs/microservices`).
 - **Cache/coordination**: Redis — per-job visited set, 3-day global content cache, fan-in completion
   counter. See [planning notes §3](../planning/01-architecture-notes.md#3-redis--decided-design).
-- **Storage**: Postgres, with the `pgvector` extension for embeddings.
+- **Storage**: Postgres, with the `pgvector` extension for embeddings. Auth Service uses TypeORM
+  (`synchronize: true` outside production — no migration framework yet, see `auth.md`); other
+  services' DB access approach is TBD when each gets built.
+- **Internal service-to-service calls**: plain HTTP via Nest's `HttpModule` — see `services.md`.
 - **Notifications**: email, SMS, Telegram Bot API.
 - **Frontend**: existing Expo/React Native app in `frontend/` (see [frontend/CLAUDE.md](../../frontend/CLAUDE.md)),
   built from reusable components (shared input fields etc. across screens) rather than per-screen markup.
@@ -37,7 +40,7 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
 - LLM + embedding model provider (affects `vector` column dimension in the data model).
 - Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives).
 - Telegram account-linking flow (bot deep-link / linking code).
-- First-admin bootstrap mechanism.
+- Gateway proxying `/auth/*`, `/me`, `/admin/users*` to Auth Service — Auth Service itself is done,
+  this wiring is the next piece of work.
 - URL-normalization edge cases (tracking params, redirect-following).
-- Internal (service-to-service) call transport — plain HTTP vs NestJS TCP microservice transport.
 - IaC tool (Terraform vs CDK) and CI/CD pipeline for AWS deployment.

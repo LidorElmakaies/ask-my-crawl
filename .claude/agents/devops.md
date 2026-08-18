@@ -13,8 +13,10 @@ focus or scope-creep into the compose setup now.
 
 Seven NestJS services (see `docs/specs/services.md`) built from `backend/apps/*` (Nest monorepo —
 see the `backend` agent), Kafka, Redis, Postgres+pgvector, and the observability stack already in
-`devops/observability/`. The frontend (Expo/React Native) is not containerized — it's a mobile/web
-client, out of scope for this compose setup.
+`devops/observability/`. Plus a **web preview** of the frontend — a static `expo export --platform
+web` build served by Caddy (`frontend/Dockerfile` + `frontend/Caddyfile`). Android/iOS are not
+containerized (nothing to gain — no compiled runtime to isolate, and it actively breaks
+phone/simulator connectivity) and still run via `npx expo start` locally.
 
 ## Docker Compose — the current target
 
@@ -36,6 +38,9 @@ client, out of scope for this compose setup.
   `make clean` — so operating the app stack feels identical to operating the observability stack.
 - Data persistence: `./data/` volumes for `postgres`, `kafka`, `redis`, matching the existing
   `devops/observability` convention (survives `down`, wiped only by `clean`).
+- `make` isn't guaranteed to exist on a bare Windows/PowerShell setup (unlike Git Bash/WSL/Mac/
+  Linux) — always give the raw `docker compose <args>` equivalent alongside any `make <target>`
+  instruction, don't assume `make` is available.
 
 ## Non-negotiables
 

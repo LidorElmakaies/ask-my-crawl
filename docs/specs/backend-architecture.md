@@ -38,6 +38,9 @@ specific libraries and external systems.
 
 ```
 src/
+  models/                             # domain layer — see below. No framework imports, ever.
+    user.ts                          # User, PublicUser, UserRole, toPublicUser()
+    refresh-token.ts                 # RefreshToken
   auth/
     api/
       auth.controller.ts             # depends on IAuthService, not AuthService
@@ -66,6 +69,26 @@ it**, not the layer that merely consumes it. `application/interfaces/` holds int
 classes implement (consumed by API). `infrastructure/interfaces/` holds interfaces Infrastructure
 classes implement (consumed by Application). File naming: `<thing>.interface.ts`, exporting
 `I<Thing>` (e.g. `IUserRepository`).
+
+**Domain models are not interfaces — don't put them in an `interfaces/` folder.** `User`,
+`RefreshToken`, and anything else that's just "what a thing looks like" (no methods, nothing to
+implement) live in a top-level `models/` folder instead, sibling to `api/`/`application/`/
+`infrastructure/`. Rule: if it's an `I<Thing>` some class `implements`, it belongs in whichever
+layer's `interfaces/` that class lives in; if it's a plain data shape, it belongs in `models/`.
+`models/` has zero dependencies on any other layer (no framework imports — not even NestJS
+decorators) — every other layer is free to import from it. A pure transform over a model that
+introduces no framework/infra dependency (e.g. `toPublicUser()`) lives alongside the model it
+transforms, not in `application/`.
+
+**Not every plain data shape is a domain model, though.** A use-case's request/response types
+(`RegisterInput`, `LoginInput`, `AuthTokens`, `AuthResult` in `auth-service.interface.ts`) are also
+plain shapes with no methods — but they stay declared right alongside the `I<Thing>Service`
+interface that uses them, not in `models/`. The test is **scope of reuse**, not "is it a plain
+object": a domain model (`User`) has a life outside any single operation — repositories, multiple
+services, API responses all reference it independently. A use-case I/O shape (`RegisterInput`)
+means nothing outside the one method it's the parameter/return type for. If a "local" shape like
+that starts getting imported from somewhere unrelated to its owning interface, that's the signal it
+was actually a domain model in disguise and belongs in `models/` after all.
 
 `AuthService.register()` calls `this.passwordHasher.hash(password)` and
 `this.userRepository.save(...)` — it has never heard of Postgres or SHA-256. Swapping either means
@@ -100,12 +123,29 @@ export class AuthModule {}
 
 ## DTOs
 
-- **Gateway-specific request/response DTOs** — the shape of what the frontend actually sends/gets
-  back over HTTP (`RegisterRequestDto`, `LoginRequestDto`, `CreateJobRequestDto`, ...) — live inside
-  `apps/gateway/src/<feature>/api/dto/`. These are the Gateway's own external contract; no other
-  service needs them, so they don't belong in a shared lib.
-- **Common backend DTOs** — shapes genuinely shared across multiple services (e.g. a `UserDto`
-  returned by Auth and consumed elsewhere via an internal call) — live in `backend/libs/dtos/`.
+**Implemented** — `backend/libs/dtos` (`@app/dtos`), containing the Auth request DTOs
+(`RegisterDto`, `LoginDto`, `RefreshTokenDto`, `UpdateMeDto`, `UpdateUserAdminDto`) and the
+`UserResponseDto` wire shape.
+
+- **The test for "shared lib vs. local `api/dto/`" is not "does the frontend send this" — it's
+  "does more than one service's code need to agree on this exact shape."** Auth Service's
+  controllers implement the `api-contracts.md` paths directly (per `services.md`'s "Gateway is a
+  thin proxy" decision) — once the Gateway proxy exists, it forwards/relays the *same* request and
+  response bodies Auth Service already validates and returns. Two services caring about one shape
+  is exactly the case a shared lib exists for: put it in `backend/libs/dtos/`, both sides import
+  the same type, and changing the shape in one place is a compile error everywhere it's used until
+  fixed everywhere.
+- **A DTO stays local to `apps/<service>/src/.../api/dto/`** only when no other service's code
+  will ever reference the same shape — e.g. a service's own internal request-building types that
+  never cross a boundary another service inspects.
+- **Response *mappers* (the function that builds a DTO from a domain model) stay local to the
+  owning service**, even when the DTO type they return is shared — only the service that owns the
+  domain model (`PublicUser`, in Auth Service's case) knows how to map it. `apps/auth/src/api/dto/
+  user-response.ts`'s `toUserResponse()` is the pattern to copy: it imports `UserResponseDto`'s
+  *type* from `@app/dtos` but the mapping function itself isn't in the shared lib.
+- A DTO that references `UserRole` imports it from `@app/auth-kernel` (see `auth-kernel`'s own
+  entry above) — not from any one service's `models/`, since role is baked into the JWT itself and
+  every app handling tokens needs the same type.
 - Kafka event payloads are a separate concern, already covered by `backend/libs/kafka-contracts`
   (see `backend/AGENTS.md` / the `backend` agent definition) — don't duplicate those as DTOs.
 

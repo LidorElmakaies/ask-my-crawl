@@ -25,8 +25,10 @@ This app is being extended from a single anonymous "paste a URL, get a scrape" s
 user-based app. Concretely, on top of the existing structure:
 
 - **Auth screens** (login/register) gating the rest of the app — no valid session, no access to the
-  crawl/results screens. Store `access_token`/`refresh_token` the same way `themeSlice` is
-  persisted (redux-persist → AsyncStorage), but keep them out of any logging/devtools output.
+  crawl/results screens. `authSlice` (persisted, like `themeSlice`) already holds `accessToken`;
+  wire the login/register thunks to a new `authService.js` (see "Services Layer" below) that
+  dispatches `setAccessToken` on success. **The token is store-managed only — never render an
+  input field or any other UI for it.** It was removed once already; don't reintroduce it.
 - **The scraper flow becomes async.** `scraperSlice`'s `submitScrapeRequest` currently expects an
   immediate response; per `docs/specs/api-contracts.md`, `POST /jobs` now returns `202` with a
   `job` in `status: "pending"` — the answer arrives later via the WebSocket push or a
@@ -43,9 +45,12 @@ user-based app. Concretely, on top of the existing structure:
   requests) per `docs/specs/api-contracts.md`'s `/admin/*` routes — gate these on the decoded JWT's
   `role` claim, not just on hiding a tab (a hidden tab is not access control; the backend enforces
   the real boundary).
-- **WebSocket connection** to the Gateway (`ws(s)://<gateway>/ws?token=<access_token>`) for live
-  `job.completed` pushes — reconnect/backoff is a frontend concern the current codebase doesn't have
-  yet; needs a small connection-manager, likely living in `src/hooks/` alongside `useAppTheme.js`.
+- **WebSocket connection is already built** — Socket.IO (not raw `ws`), via `socketService.js` +
+  `wsSlice`'s thunks, auto-connected/disconnected by `app/_layout.js`'s `RealtimeConnectionManager`
+  whenever `authSlice.accessToken` changes. Auto-reconnect on drop is handled by Socket.IO itself
+  (`wsSlice` reflects that as `status: 'connecting'`). Don't build a second connection-manager —
+  extend this one, and route any new server-pushed event type through `wsSlice`'s existing
+  `wsMessageReceived`/`onMessage` path.
 
 ## Build for reuse — components, not per-screen markup
 
@@ -60,6 +65,18 @@ General rule: before adding a new screen, check `src/components/` for something 
 if a UI pattern is about to appear a second time, extract it to a component before a third screen
 copies it again. This applies beyond inputs — buttons, form-level error banners, list rows for the
 new job-history tab, etc. — same principle, same folder.
+
+## Services layer — where all I/O lives
+
+Every network call (HTTP or WebSocket) lives in a plain module under `src/services/`
+(`socketService.js`, `scraperService.js`, and — once auth screens are built — `authService.js`),
+never inline inside a thunk and never inside a component. Services know nothing about Redux (no
+`dispatch`, no reading state); thunks call the service and translate its result/callbacks into
+dispatched actions; components only ever `dispatch()` a thunk and `useSelector()` state. **Custom
+hooks are the exception, not the default** — reach for one only when a component genuinely needs
+something no thunk/selector combination can give it. See `frontend/CLAUDE.md`'s "Services Layer"
+section for the full rationale — this applies to every future I/O call, not just the ones already
+built.
 
 ## Source of truth
 

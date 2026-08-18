@@ -15,31 +15,39 @@
 
 ```
 app/
-  _layout.js          # Root provider stack (Redux, PersistGate, ThemeProvider, ThemeAnimProvider)
+  _layout.js          # Root provider stack (Redux, PersistGate, ThemeProvider, ThemeAnimProvider,
+                       # RealtimeConnectionManager — auto connects/disconnects the WS on token change)
   (tabs)/
     _layout.js        # Custom animated tab bar
     index.js          # Home / landing screen
     scraper.js        # URL input + scrape result display
-    settings.js       # Light/dark theme toggle
+    settings.js       # Theme toggle + connection status indicator
 src/
   components/
+    ConnectionStatus.js # Dot + label, reads wsSlice.status
     GlowCard.js       # Themed card with glow shadow
     GradientButton.js # LinearGradient button with loading state
+    InputField.js     # Reusable labeled text input — use this, don't hand-roll TextInput
     SpaceBackground.js# Animated dual-layer starfield background
     ThemeProvider.js  # Gluestack UI provider wired to Redux theme
   context/
     ThemeAnimContext.js # Shared Animated.Value (0=light, 1=dark) for 600ms transitions
   hooks/
     useAppTheme.js    # Returns { isDark, colors, colorMode } — use this everywhere
+  services/            # All I/O lives here — see "Services Layer" below
+    socketService.js   # Socket.IO client wrapper (connect/disconnect/isConnected)
+    scraperService.js  # POST /api/scrape
   store/
-    index.js          # Store config: scraper (ephemeral) + theme (persisted)
+    index.js          # Store config: scraper + ws (ephemeral), theme + auth (persisted)
     slices/
-      scraperSlice.js # Async thunk → POST /api/scrape, status/result/error
+      authSlice.js    # accessToken — store-managed only, no UI ever shows/edits it directly
+      scraperSlice.js # Thunk → scraperService.submitScrapeRequest, status/result/error
       themeSlice.js   # mode: null | 'light' | 'dark'
+      wsSlice.js      # Thunks → socketService, status/lastMessage/error
   theme/
     colors.js         # Dual palettes: dark (indigo/cyan) + light (indigo/teal)
   config/
-    urls.js           # BASE_URL = http://localhost:8000, URLS.gateway.scrape
+    urls.js           # BASE_URL, URLS.gateway.scrape, URLS.gateway.wsOrigin/wsPath
 ```
 
 ## Theme System
@@ -53,26 +61,58 @@ src/
 
 To theme a new component: import `useAppTheme` and `useThemeAnim`. Use `colors.*` for static values; interpolate `progress` for animated color transitions.
 
-## API
+## Services Layer — where all I/O lives
 
-Single endpoint, no auth:
+Every network call (HTTP or WebSocket) lives in a plain module under `src/services/`, never inline
+inside a thunk and never inside a component:
+
+- **Services** (`src/services/*.js`) own the raw I/O — `fetch`, `socket.io-client`, whatever the
+  call needs. They know nothing about Redux: no `dispatch`, no reading store state. They expose
+  plain functions (`submitScrapeRequest(url)`) or a callback-based API for long-lived connections
+  (`connect(token, { onMessage, ... })`).
+- **Thunks** (`src/store/slices/*.js`) call the service and translate the result into dispatched
+  actions. This is the *only* layer allowed to import a service module.
+- **Components** only ever `dispatch()` a thunk and `useSelector()` state — never import a service
+  directly, never hold connection/request state in `useState`.
+- **Custom hooks are the exception, not the default** — only reach for one when a component
+  genuinely needs something no thunk/selector combination can give it. The default path is always
+  component → thunk → service.
+
+Concretely: `wsSlice.js`'s thunks call `socketService.js`; `scraperSlice.js`'s thunk calls
+`scraperService.js`. When Auth Service exists and login/register are built, that thunk will call a
+new `authService.js` the same way — this is the established pattern for all future I/O, not
+WS-specific.
+
+## HTTP API
 
 ```
 POST http://localhost:8000/api/scrape
 Body: { "url": "<string>" }
 ```
 
-`scraperSlice.submitScrapeRequest(url)` is the async thunk. Results are **not persisted** — cleared on reload or via `clearScraper()`.
+`scraperSlice.submitScrapeRequest(url)` is the async thunk (calls `scraperService`). Results are
+**not persisted** — cleared on reload or via `clearScraper()`.
 
-Change the URL in [src/config/urls.js](src/config/urls.js).
+## WebSocket (Socket.IO)
+
+Connects to `URLS.gateway.wsOrigin` at path `URLS.gateway.wsPath` (`/ws`), token sent as
+`auth: { token }` in the handshake — see `docs/specs/api-contracts.md`. `wsSlice`'s
+`connectWebSocket()`/`disconnectWebSocket()` thunks call `socketService`; `app/_layout.js`'s
+`RealtimeConnectionManager` dispatches them automatically whenever `authSlice.accessToken`
+changes, so nothing else needs to call them manually. Socket.IO reconnects automatically on drop
+(`wsSlice` reflects that as `status: 'connecting'`, not a dead-end `disconnected`).
+
+Change either URL in [src/config/urls.js](src/config/urls.js).
 
 ## Provider Order (root layout)
 
 ```
 Redux Provider
-  └─ PersistGate (rehydrates theme from AsyncStorage)
+  └─ PersistGate (rehydrates theme + auth from AsyncStorage)
      └─ ThemeProvider (Gluestack colorMode)
         └─ ThemeAnimProvider (animation context)
+           └─ RealtimeConnectionManager (no UI — dispatches connectWebSocket()/
+              disconnectWebSocket() whenever authSlice.accessToken changes)
            └─ Stack (Expo Router)
 ```
 
@@ -82,7 +122,9 @@ Order matters — do not reorder providers.
 
 - **Always use `useAppTheme()`** for colors, never hardcode or reference `colors.js` directly in components.
 - **Build shared UI as components in `src/components/`, not duplicated per-screen markup** — e.g. a single reusable input-field component used by the URL/query submission screen, register, and login, rather than each screen hand-rolling its own `TextInput`. See [../.claude/agents/frontend.md](../.claude/agents/frontend.md)'s "Build for reuse" section.
+- **All I/O goes through `src/services/`, called only from thunks** — see "Services Layer" above. Never inline a `fetch`/`socket.io-client` call in a thunk or a component.
 - **Scraper state is ephemeral** — do not add persistence to `scraperSlice`.
+- **The access token is never shown or manually entered in the UI** — `authSlice` is store-managed only, set by the real login flow once it exists.
 - **Theme persistence is automatic** — `redux-persist` handles it; do not manually write to AsyncStorage.
 - Tab icons follow the `<name>-outline` / `<name>` Ionicons pattern for inactive/active states.
 - Custom tab bar lives in `app/(tabs)/_layout.js` — the `CustomTabBar` component uses `progress.interpolate()` for smooth color transitions, not `useAppTheme()` directly.

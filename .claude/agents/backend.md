@@ -18,21 +18,33 @@ service in `docs/specs/services.md`:
 ```
 backend/
   apps/
-    gateway/
-    auth/
+    gateway/              # implemented — realtime/WS via Socket.IO
+    auth/                 # implemented — register/login/refresh/logout, /me, /admin/users*
     crawl-worker/
     search-result-manager/
     query-answer/
     notification/
     crawl-result-manager/
   libs/
+    auth-kernel/          # implemented — IJwtService/IAuthTokenService (sign+verify), shared by
+                          # Gateway (verifies, WS handshake) and Auth Service (signs + verifies).
+                          # The one lib every app needing auth imports — see its module for the
+                          # DI wiring pattern to copy for future shared libs.
     kafka-contracts/     # shared types for event-schemas.md payloads — every app imports
                           # these instead of redefining Kafka message shapes locally
-    dtos/                # DTOs genuinely shared across services (not Gateway-only request/
-                          # response shapes — those live in apps/gateway/.../api/dto/)
-    shared-kernel/        # cross-cutting interfaces/types genuinely shared across apps, if any
-                          # emerge (keep this small — most interfaces belong inside the owning app)
+    dtos/                 # implemented — Auth's request DTOs + UserResponseDto. The test isn't
+                          # "does the frontend send this," it's "does more than one service's
+                          # code need to agree on this shape" — Auth Service implements
+                          # api-contracts.md's paths directly, Gateway will proxy the same
+                          # bodies, so both need the same type. Response *mappers* stay local
+                          # to the owning service (see backend-architecture.md's DTOs section).
 ```
+
+Path aliases for libs (`@app/auth-kernel`, etc.) are declared in root `tsconfig.json`'s `paths` —
+Nest's webpack build resolves them automatically, but **Jest does not** — both `jest.config.js` and
+every app's `test/jest-e2e.config.js` derive their `moduleNameMapper` from those same `paths` via
+`ts-jest`'s `pathsToModuleNameMapper`, so a new lib alias only needs to be added in one place
+(`tsconfig.json`) to work everywhere.
 
 Each `apps/<service>/src/` follows the 3-layer structure in `docs/specs/backend-architecture.md` —
 `api/` / `application/` / `infrastructure/`. Read that doc before writing your first file in a new
@@ -45,13 +57,19 @@ is built on. Key points to keep front of mind while coding (full detail in the s
   interfaces Infrastructure classes implement (e.g. `IUserRepository`, `IPasswordHasher`,
   implemented by concrete adapters, consumed by the Application layer). An interface lives beside
   the class that implements it, not the class that merely consumes it.
+- **Domain models are not interfaces.** `User`, `RefreshToken`, and any other plain data shape (no
+  methods, nothing to implement) go in a top-level `models/` folder — sibling to `api/`/
+  `application/`/`infrastructure/`, zero framework dependencies, importable from any layer. Don't
+  put a plain data type in an `interfaces/` folder just because it's TypeScript `interface` syntax
+  — that folder is for `I<Thing>` contracts a class implements.
 - **Kafka producers are Infrastructure, not API.** Consumers (`@EventPattern`) are inbound triggers
   (API layer); publishing is an outbound side effect (Infrastructure), behind an interface like
   `IEventPublisher`. Never call a Kafka client's `emit`/`send` directly from Application or API code.
-- **DTOs**: Gateway-specific request/response DTOs (what the frontend actually sends) live in
-  `apps/gateway/src/<feature>/api/dto/` — not shared. Genuinely cross-service DTOs live in
-  `backend/libs/dtos/`. Kafka event payloads stay in `backend/libs/kafka-contracts`, separate from
-  both.
+- **DTOs**: if another service's code needs to agree on the same request/response shape (e.g. any
+  route Gateway proxies rather than reimplements), it belongs in `backend/libs/dtos/` — see
+  `apps/auth/src/api/controllers/*` for the pattern. Only DTOs no other service will ever see stay
+  local to `apps/<service>/src/.../api/dto/`. Kafka event payloads stay in
+  `backend/libs/kafka-contracts`, separate from both.
 
 ## Source of truth, in order
 
@@ -72,8 +90,10 @@ is built on. Key points to keep front of mind while coding (full detail in the s
   Crawl Result Manager — don't reach into its Postgres tables directly, even though it's the same
   physical database for now.
 - **Password hashing is `SHA256(PEPPER + salt + password)`**, per `auth.md`, implemented as an
-  Infrastructure adapter (`SaltPepperSha256Hasher`) behind a `PasswordHasherPort` — never inline
-  `crypto.createHash` in a controller or service class.
+  Infrastructure adapter (`SaltPepperSha256Hasher`, in `apps/auth`) behind `IPasswordHasher` — never
+  inline `crypto.createHash` in a controller or service class.
+- **Internal (service-to-service) calls are plain HTTP** via Nest's `HttpModule` — resolved, not
+  TCP microservices. See `services.md`.
 - **Application-layer classes take Infrastructure interfaces in their constructor, never concrete
   Infrastructure classes** — and API-layer classes take the Application interface, never the
   concrete Application service. If you find yourself importing `pg`, `kafkajs`, or an HTTP client
@@ -88,5 +108,5 @@ is built on. Key points to keep front of mind while coding (full detail in the s
 ## When a spec is silent or ambiguous
 
 Flag it and propose an addition to the relevant `docs/specs/*.md` file rather than silently picking
-an approach — several things are explicitly marked TBD there (internal call transport, LLM/embedding
-provider, first-admin bootstrap). Don't invent a resolution to those without surfacing it.
+an approach — several things are explicitly marked TBD there (LLM/embedding provider, email/SMS
+provider, Telegram linking flow). Don't invent a resolution to those without surfacing it.

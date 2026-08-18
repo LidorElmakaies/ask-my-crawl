@@ -1,7 +1,10 @@
 # API Contracts
 
-All HTTP surface is exposed through the **Gateway** — no other service is reachable directly from
-the frontend. Error responses use `{ "error": { "code": "string", "message": "string" } }`.
+All HTTP surface is **meant to be** exposed through the **Gateway** — no other service reachable
+directly from the frontend. **Current implementation status:** Auth Service is built and these
+routes are real, but it currently runs standalone on its own port (`8001`) — the Gateway does not
+yet proxy `/auth/*`, `/me`, `/admin/users*` to it (tracked as the next piece of work; see
+`services.md`). Error responses use `{ "error": { "code": "string", "message": "string" } }`.
 
 ## Auth
 
@@ -9,19 +12,22 @@ None of these require an access token (they're how you get one).
 
 | Method | Path | Body | Response |
 |---|---|---|---|
-| POST | `/auth/register` | `{ email, password, phone_number?, telegram_chat_id? }` | `201` → `{ user, access_token, refresh_token }` |
+| POST | `/auth/register` | `{ email, password, name?, phone_number?, telegram_chat_id? }` | `201` → `{ user, access_token, refresh_token }` |
 | POST | `/auth/login` | `{ email, password }` | `200` → `{ user, access_token, refresh_token }` |
-| POST | `/auth/refresh` | `{ refresh_token }` | `200` → `{ access_token, refresh_token }` (rotated) |
+| POST | `/auth/refresh` | `{ refresh_token }` | `200` → `{ access_token, refresh_token }` (rotated — the old refresh token is revoked) |
 | POST | `/auth/logout` | `{ refresh_token }` | `204` — revokes the refresh token |
 
-`user` shape: `{ id, email, role, phone_number, telegram_chat_id }` (never includes hash/salt).
+`user` shape: `{ id, email, name, role, phone_number, telegram_chat_id }` (never includes hash/salt).
+`email` is always lowercased server-side, so `Bob@x.com` and `bob@x.com` are the same account
+(register with the second returns `409 Conflict`). `password` must be at least 8 characters
+(`400` otherwise).
 
 ## Self-service (requires valid access token, any role)
 
 | Method | Path | Body | Response |
 |---|---|---|---|
 | GET | `/me` | — | `200` → `user` |
-| PATCH | `/me` | `{ email?, phone_number?, telegram_chat_id?, password? }` | `200` → `user` |
+| PATCH | `/me` | `{ email?, name?, phone_number?, telegram_chat_id?, password? }` | `200` → `user` |
 
 ## Jobs (requires valid access token)
 
@@ -39,17 +45,26 @@ None of these require an access token (they're how you get one).
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | GET | `/admin/users` | — | List all users |
-| GET | `/admin/users/:id` | — | |
-| PATCH | `/admin/users/:id` | `{ email?, phone_number?, role? }` | Role changes only via this endpoint, not `/me` |
-| DELETE | `/admin/users/:id` | — | `204` |
+| GET | `/admin/users/:id` | — | `404` if not found |
+| PATCH | `/admin/users/:id` | `{ email?, phone_number?, role? }` | Role changes only via this endpoint, not `/me`. Since role lives inside the JWT payload, a role change only takes effect on that user's *next* login (their current access token still carries the old role until it expires) |
+| DELETE | `/admin/users/:id` | — | `204`, `404` if not found |
 
-## WebSocket
+## WebSocket (Socket.IO)
 
-Single endpoint: `ws(s)://<gateway>/ws?token=<access_token>` (or `Authorization` header if the
-client library supports it on the WS upgrade request). Gateway verifies the token the same way as
-HTTP requests before accepting the upgrade.
+Not a raw WebSocket — **Socket.IO**, chosen over raw `ws` for free auto-reconnect-with-backoff and
+the ability to reject an unauthenticated handshake outright (client gets `connect_error`) rather
+than accepting the connection and closing it immediately after.
 
-Server → client events:
+- Connect to the Gateway's HTTP origin, path `/ws`, `transports: ['websocket']` (skip long-polling
+  — this deployment is always reachable directly over WS, no need for the fallback).
+- Token sent as `auth: { token: <access_token> }` in the client handshake — not a query param,
+  not a header.
+- Invalid/missing token → the server's connection middleware calls `next(new Error('Unauthorized'))`
+  before the handshake completes → client sees `connect_error`, never `connect`.
+
+Server → client: every event arrives on a single `message` event, payload shaped exactly as below
+(the `type` field disambiguates, kept identical to what `event-schemas.md`'s `result-saved` topic
+carries, regardless of transport):
 
 ```jsonc
 // on job completion, matches the result-saved Kafka event
@@ -59,8 +74,11 @@ Server → client events:
 { "type": "job.status", "job_id": "uuid", "status": "crawling" | "answering" }
 ```
 
-No client → server messages are required for v1 — the socket is push-only. Reconnection/backoff is
-a frontend concern (see `frontend/CLAUDE.md`'s eventual WS integration notes once written).
+No client → server messages are required for v1 — the socket is push-only. Frontend implementation:
+`frontend/src/services/socketService.js` (the only file allowed to import `socket.io-client`),
+orchestrated by `wsSlice`'s thunks, auto-connected by `app/_layout.js`'s
+`RealtimeConnectionManager` whenever the stored access token changes — see `frontend/CLAUDE.md`'s
+"Services Layer" / "WebSocket (Socket.IO)" sections.
 
 ## Token handling (Gateway behavior)
 

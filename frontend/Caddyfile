@@ -1,0 +1,8 @@
+:80 {
+	root * /srv
+	encode gzip
+	# Expo Router's web export is a single-page app — any path that isn't a real static file
+	# (e.g. a client-side route like /settings) falls back to index.html.
+	try_files {path} /index.html
+	file_server
+}

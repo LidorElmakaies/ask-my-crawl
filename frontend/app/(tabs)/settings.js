@@ -1,6 +1,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
+import ConnectionStatus from '../../src/components/ConnectionStatus';
+import GlowCard from '../../src/components/GlowCard';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 import { setThemeMode } from '../../src/store/slices/themeSlice';
@@ -8,6 +10,7 @@ import { setThemeMode } from '../../src/store/slices/themeSlice';
 export default function SettingsScreen() {
   const dispatch = useDispatch();
   const { mode } = useSelector((state) => state.theme);
+  const { status } = useSelector((state) => state.ws);
   const { isDark, colors, colorMode } = useAppTheme();
 
   const toggle = () => dispatch(setThemeMode(isDark ? 'light' : 'dark'));
@@ -73,6 +76,16 @@ export default function SettingsScreen() {
             Following system default · {colorMode}
           </Text>
         )}
+
+        <Text style={[styles.section, styles.connectionSection, { color: colors.textMuted }]}>
+          Server connection
+        </Text>
+        <GlowCard>
+          {/* Token is store-managed only (authSlice), never shown/entered here — the real
+              login flow (docs/specs/auth.md) will set it. RealtimeConnectionManager in
+              app/_layout.js connects automatically whenever a token is present. */}
+          <ConnectionStatus status={status} />
+        </GlowCard>
       </View>
     </SpaceBackground>
   );
@@ -137,5 +150,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginTop: 16,
+  },
+  connectionSection: {
+    marginTop: 32,
   },
 });

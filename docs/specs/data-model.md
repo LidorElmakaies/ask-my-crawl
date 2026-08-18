@@ -11,12 +11,17 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
 
 ## Owned by Auth Service
 
+**Implemented.** TypeORM, `synchronize: true` outside `NODE_ENV=production` — no migration
+framework yet (simplest thing that works for the Docker Compose phase); revisit before this ever
+runs against real prod data. Entities: `apps/auth/src/infrastructure/postgres/entities/`.
+
 ```sql
 CREATE TYPE user_role AS ENUM ('admin', 'user');
 
 CREATE TABLE users (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email             TEXT NOT NULL UNIQUE,
+  email             TEXT NOT NULL UNIQUE,  -- always stored lowercased
+  name              TEXT,                 -- optional display name, e.g. for "Hi Alice" in notifications
   phone_number      TEXT,                 -- E.164 format, required before SMS can be sent
   telegram_chat_id  TEXT,                 -- set once the user links their Telegram account
   password_hash     TEXT NOT NULL,        -- SHA-256(pepper + salt + plaintext) — see auth.md
@@ -29,7 +34,9 @@ CREATE TABLE users (
 CREATE TABLE refresh_tokens (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash   TEXT NOT NULL UNIQUE,       -- store a hash, never the raw token
+  token_hash   TEXT NOT NULL UNIQUE,       -- SHA-256 of the raw token, no salt/pepper needed —
+                                            -- the token itself is already high-entropy random,
+                                            -- unlike a human-chosen password
   expires_at   TIMESTAMPTZ NOT NULL,
   revoked_at   TIMESTAMPTZ,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -1,0 +1,95 @@
+# App stack (as opposed to devops/observability/docker-compose.yml, the telemetry stack).
+# Kept as a separate compose project, joined via the shared `askmycrawl` network below, so the
+# two can be brought up independently or together.
+#
+# `gateway`, `auth`, and `frontend` (web preview) exist as real code today — see
+# docs/specs/services.md for the remaining five backend services. Add each one here (its own
+# Dockerfile under backend/apps/<service>/, its own service block) as it gets built, along with
+# redis/kafka once something actually depends on them — see the `devops` agent
+# (.claude/agents/devops.md) for the full target shape.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=askmycrawl_auth
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - askmycrawl
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  gateway:
+    build:
+      context: ../backend
+      dockerfile: apps/gateway/Dockerfile
+    env_file:
+      - ../backend/.env
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    networks:
+      - askmycrawl
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  auth:
+    build:
+      context: ../backend
+      dockerfile: apps/auth/Dockerfile
+    env_file:
+      - ../backend/.env
+    environment:
+      # Overrides the .env file's localhost-based default — container-to-container calls use
+      # the service name, not localhost.
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl_auth
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - askmycrawl
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    # Web preview only, static export served by Caddy — see frontend/Dockerfile.
+    # Android/iOS still run via `npx expo start` locally.
+    build:
+      context: ../frontend
+    ports:
+      - "8081:80"
+    restart: unless-stopped
+    networks:
+      - askmycrawl
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  askmycrawl:
+    driver: bridge
