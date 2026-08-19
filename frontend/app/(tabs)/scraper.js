@@ -17,18 +17,23 @@ import { clearScraper, submitScrapeRequest } from '../../src/store/slices/scrape
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
+  const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
+  const [queryFocused, setQueryFocused] = useState(false);
   const dispatch = useDispatch();
   const { status, result, error } = useSelector((state) => state.scraper);
   const { colors } = useAppTheme();
 
+  const canSubmit = !!input.trim() && !!query.trim();
+
   const handleSubmit = () => {
-    if (!input.trim()) return;
-    dispatch(submitScrapeRequest(input.trim()));
+    if (!canSubmit) return;
+    dispatch(submitScrapeRequest({ url: input.trim(), query: query.trim() }));
   };
 
   const handleClear = () => {
     setInput('');
+    setQuery('');
     dispatch(clearScraper());
   };
 
@@ -74,12 +79,38 @@ export default function ScraperScreen() {
             onBlur={() => setFocused(false)}
           />
 
+          {/* Label */}
+          <Text style={[styles.label, { color: colors.textMuted }]}>QUERY</Text>
+
+          {/* Input */}
+          <TextInput
+            style={[
+              styles.queryInput,
+              {
+                backgroundColor: colors.inputBg,
+                borderColor: queryFocused ? colors.inputFocusBorder : colors.inputBorder,
+                color: colors.text,
+                shadowColor: queryFocused ? colors.primary : 'transparent',
+                shadowOpacity: 0.4,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 0 },
+              },
+            ]}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="What do you want to know about this page?"
+            placeholderTextColor={colors.textMuted}
+            multiline
+            onFocus={() => setQueryFocused(true)}
+            onBlur={() => setQueryFocused(false)}
+          />
+
           {/* Button */}
           <GradientButton
             label="Send Request"
             onPress={handleSubmit}
             loading={status === 'loading'}
-            disabled={!input.trim()}
+            disabled={!canSubmit}
             style={{ marginTop: 8 }}
           />
         </GlowCard>
@@ -164,7 +195,17 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 15,
     marginBottom: 16,
-    fontFamily: 'monospace',
+    fontFamily: 'monospace', // URL — monospace suits a raw address
+  },
+  queryInput: {
+    borderWidth: 1.5,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+    marginBottom: 16,
+    minHeight: 80,
+    textAlignVertical: 'top', // Android: multiline text starts at the top, not vertically centered
   },
   feedback: {
     borderWidth: 1,

@@ -14,6 +14,9 @@ const themePersistConfig = {
 const authPersistConfig = {
   key: 'auth',
   storage: AsyncStorage,
+  // status/error are per-submission ephemeral state (same rule as scraperSlice/wsSlice) — only
+  // user/accessToken/refreshToken should survive a reload.
+  blacklist: ['status', 'error'],
 };
 
 export const store = configureStore({

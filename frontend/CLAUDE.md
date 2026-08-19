@@ -88,11 +88,13 @@ I/O, not WS-specific.
 
 ```
 POST http://localhost:8000/api/scrape
-Body: { "url": "<string>" }
+Body: { "url": "<string>", "query": "<string>" }
 ```
 
-`scraperSlice.submitScrapeRequest(url)` is the async thunk (calls `scraperService`). Results are
-**not persisted** — cleared on reload or via `clearScraper()`.
+Both fields are required — `query` is free text (what to ask about the page), no format
+validation beyond non-empty. `scraperSlice.submitScrapeRequest({ url, query })` is the async thunk
+(calls `scraperService`). Results are **not persisted** — cleared on reload or via
+`clearScraper()`.
 
 **Auth — different origin, for now.** The Gateway doesn't proxy `/auth/*` yet (see
 `docs/specs/services.md`), so `authService.js` calls **Auth Service directly** at its own origin —

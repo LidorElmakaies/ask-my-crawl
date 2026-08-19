@@ -3,9 +3,9 @@ import * as scraperService from '../../services/scraperService';
 
 export const submitScrapeRequest = createAsyncThunk(
   'scraper/submit',
-  async (url, { rejectWithValue }) => {
+  async ({ url, query }, { rejectWithValue }) => {
     try {
-      return await scraperService.submitScrapeRequest(url);
+      return await scraperService.submitScrapeRequest({ url, query });
     } catch (err) {
       return rejectWithValue(err.message);
     }
