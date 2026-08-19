@@ -17,16 +17,19 @@ instead of aspirational.
 | Layer | What you test | How | Volume |
 |---|---|---|---|
 | **Application** | Use-case logic (`*.service.ts` in `application/`) | Unit tests, Application ports mocked (`jest.mock`/manual fakes) — no real Postgres, Kafka, or Redis | Most of the suite — fast, no I/O |
-| **Infrastructure** | Concrete adapters (`PostgresUserRepository`, `SaltPepperSha256Hasher`, Kafka producer/consumer wrappers, the Redis visited-set/cache/counter adapters) | Integration tests against the real dependency (testcontainers for Postgres/Kafka/Redis in CI) | Fewer, one set per adapter |
+| **Infrastructure** | Concrete adapters (`TypeOrmUserRepository`, `SaltPepperSha256Hasher`, Kafka producer/consumer wrappers, the Redis visited-set/cache/counter adapters) | Integration tests against the real dependency (testcontainers for Postgres/Kafka/Redis in CI) | Fewer, one set per adapter |
 | **API** | Controllers, Kafka `@EventPattern` handlers, WS gateway | E2E/contract tests — `supertest` against HTTP routes per `docs/specs/api-contracts.md`, and payload-shape assertions against `docs/specs/event-schemas.md` | Fewest, but covers every route/topic at least once |
 
 ## Where tests live
 
 - Unit tests: colocated `*.spec.ts` next to the file under test (Nest/Jest default).
-- E2E tests: each `backend/apps/<service>/test/` directory (Nest's default e2e location).
-- Shared test infrastructure (testcontainer helpers, Kafka test harness, fixture builders): a
-  `backend/libs/testing` lib — every app's tests import from there rather than each reinventing a
-  "spin up a throwaway Postgres" helper.
+- E2E tests: each `backend/apps/<service>/test/` directory (Nest's default e2e location) — see
+  `apps/auth/test/app.e2e-spec.ts` for the current pattern (real Postgres via
+  `@testcontainers/postgresql`, spun up in `beforeAll`).
+- **`backend/libs/testing` doesn't exist yet** — right now each app's e2e test sets up its own
+  testcontainers directly (only `auth` needs one so far; `gateway`'s e2e test needs no external
+  dependency at all). Once a *second* app needs the same testcontainers-Postgres pattern, extract
+  the shared setup into `backend/libs/testing` rather than copy-pasting a third time.
 
 ## Per-service input/output contracts — the core of your job
 

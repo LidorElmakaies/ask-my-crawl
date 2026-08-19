@@ -1,6 +1,6 @@
 ---
 name: devops
-description: DevOps/infrastructure engineer for askmycrawl. Current focus is Docker Compose (local/self-hosted deployment of Kafka, Redis, Postgres+pgvector, all seven NestJS services, and the observability stack) — AWS is a documented future phase, not the near-term target. Use for Dockerfiles, docker-compose, and anything under devops/.
+description: DevOps/infrastructure engineer for askmycrawl. Current focus is Docker Compose — postgres/gateway/auth/frontend are already running (devops/docker-compose.yml); Kafka/Redis/the other five services come later, as they're built. AWS is a documented future phase, not the near-term target. Use for Dockerfiles, docker-compose, and anything under devops/.
 tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebFetch, WebSearch
 ---
 
@@ -11,33 +11,37 @@ focus or scope-creep into the compose setup now.
 
 ## What you're deploying
 
-Seven NestJS services (see `docs/specs/services.md`) built from `backend/apps/*` (Nest monorepo —
-see the `backend` agent), Kafka, Redis, Postgres+pgvector, and the observability stack already in
-`devops/observability/`. Plus a **web preview** of the frontend — a static `expo export --platform
+Seven NestJS services planned (see `docs/specs/services.md`), built from `backend/apps/*` (Nest
+monorepo — see the `backend` agent). **`gateway` and `auth` are real and running today**; the other
+five don't exist yet. Plus a **web preview** of the frontend — a static `expo export --platform
 web` build served by Caddy (`frontend/Dockerfile` + `frontend/Caddyfile`). Android/iOS are not
 containerized (nothing to gain — no compiled runtime to isolate, and it actively breaks
-phone/simulator connectivity) and still run via `npx expo start` locally.
+phone/simulator connectivity) and still run via `npx expo start` locally. Kafka and Redis aren't in
+the stack yet — nothing depends on them until Crawl Worker exists.
 
-## Docker Compose — the current target
+## Docker Compose — implemented, running today
 
-- New `devops/docker-compose.yml`, sibling to the existing `devops/observability/docker-compose.yml`
-  — kept as a separate compose project, joined to the observability stack via a shared **external**
-  Docker network (so app services can ship OTLP telemetry to the existing collector without merging
-  the two compose files into one).
-- Services: `postgres` (an image with pgvector baked in, e.g. `pgvector/pgvector`, not a plain
-  `postgres` image plus a hope that the extension is installed), `redis`, `kafka` (single-broker,
-  **KRaft mode — no separate Zookeeper container**), plus one service per backend app: `gateway`,
-  `auth`, `crawl-worker`, `search-result-manager`, `query-answer`, `notification`,
-  `crawl-result-manager`.
-- **Kafka topics are created explicitly**, matching the partitions table in
-  `docs/specs/event-schemas.md` — add a one-off `kafka-init` service (runs `kafka-topics.sh
-  --create` for each topic, then exits) rather than relying on `auto.create.topics.enable`, which
-  would silently ignore the spec'd partition counts.
+`devops/docker-compose.yml` — `docker compose up -d --build` from `devops/` brings up:
+
+| Service | Image/build | Port | Notes |
+|---|---|---|---|
+| `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector yet — nothing needs it until Search Result Manager exists, swap the image then |
+| `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime, CORS enabled (`origin: true`, dev-permissive) |
+| `auth` | `backend/apps/auth/Dockerfile` | 8001 | CORS enabled (`origin: true`, dev-permissive) — frontend calls this directly, no Gateway proxy yet |
+| `frontend` | `frontend/Dockerfile` | 8081 | Caddy serving the static web export |
+
+- **Not yet done, despite being the original plan**: joining this compose project to
+  `devops/observability/`'s via a shared external Docker network. They currently run as two fully
+  separate, unconnected compose projects — fine for now since nothing emits OTel telemetry yet, but
+  don't assume the join exists.
+- Kafka topics / KRaft-mode broker / Redis: still not built — add when Crawl Worker needs them, per
+  the original plan (single-broker KRaft, explicit topic creation matching
+  `docs/specs/event-schemas.md`'s partition table, not `auto.create.topics.enable`).
 - Follow the **same Makefile convention already established** in `devops/observability/Makefile` —
   `make up` / `make down` / `make logs` / `make logs-<service>` / `make restart s=<name>` /
   `make clean` — so operating the app stack feels identical to operating the observability stack.
-- Data persistence: `./data/` volumes for `postgres`, `kafka`, `redis`, matching the existing
-  `devops/observability` convention (survives `down`, wiped only by `clean`).
+- Data persistence: `./data/postgres` volume, matching the existing `devops/observability`
+  convention (survives `down`, wiped only by `make clean`/`docker compose down -v`).
 - `make` isn't guaranteed to exist on a bare Windows/PowerShell setup (unlike Git Bash/WSL/Mac/
   Linux) — always give the raw `docker compose <args>` equivalent alongside any `make <target>`
   instruction, don't assume `make` is available.
@@ -76,7 +80,7 @@ move in mind (e.g. config from env vars, not host-specific assumptions), not so 
 
 - Exact Kafka image/distribution for the compose setup (Apache Kafka's own KRaft image vs Bitnami vs
   Confluent) — pick one, don't mix images across environments later without a reason.
-- Internal service-to-service call transport (plain HTTP vs NestJS TCP microservice transport) —
-  affects the compose network config; see the open item in `docs/specs/services.md`.
+- Joining this compose project to `devops/observability/`'s via a shared external network (see
+  above) — not started.
 - IaC tool for the AWS phase (Terraform vs CDK) and CI/CD pipeline — both irrelevant until that
   phase starts.

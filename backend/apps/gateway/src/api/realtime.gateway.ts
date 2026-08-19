@@ -24,8 +24,12 @@ type AppSocket = Socket<
  * API layer. Per docs/specs/api-contracts.md: Socket.IO at path `/ws`, token passed as
  * `auth: { token }` in the client handshake. Does exactly two things — authenticate the
  * handshake, hand off to the Application layer — no business logic here.
+ *
+ * cors: origin reflected permissively — this is the Docker Compose dev phase, the frontend's
+ * web preview runs on a different port (different origin) than the Gateway. Lock this down to
+ * specific origins before this is ever a real deployment.
  */
-@WebSocketGateway({ path: '/ws' })
+@WebSocketGateway({ path: '/ws', cors: { origin: true } })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayDisconnect {
   private readonly logger = new Logger(RealtimeGateway.name);
 

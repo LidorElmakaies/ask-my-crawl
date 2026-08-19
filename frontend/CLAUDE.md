@@ -47,7 +47,8 @@ src/
   theme/
     colors.js         # Dual palettes: dark (indigo/cyan) + light (indigo/teal)
   config/
-    urls.js           # BASE_URL, URLS.gateway.scrape, URLS.gateway.wsOrigin/wsPath
+    urls.js           # BASE_URL, URLS.gateway.scrape, URLS.gateway.wsOrigin/wsPath —
+                       # needs URLS.auth.origin added for Auth Service (see "HTTP API" below)
 ```
 
 ## Theme System
@@ -79,9 +80,9 @@ inside a thunk and never inside a component:
   component → thunk → service.
 
 Concretely: `wsSlice.js`'s thunks call `socketService.js`; `scraperSlice.js`'s thunk calls
-`scraperService.js`. When Auth Service exists and login/register are built, that thunk will call a
-new `authService.js` the same way — this is the established pattern for all future I/O, not
-WS-specific.
+`scraperService.js`. Auth Service now exists (see "HTTP API" below) — login/register/etc. thunks
+should call a new `authService.js` the same way. This is the established pattern for all future
+I/O, not WS-specific.
 
 ## HTTP API
 
@@ -92,6 +93,17 @@ Body: { "url": "<string>" }
 
 `scraperSlice.submitScrapeRequest(url)` is the async thunk (calls `scraperService`). Results are
 **not persisted** — cleared on reload or via `clearScraper()`.
+
+**Auth — different origin, for now.** The Gateway doesn't proxy `/auth/*` yet (see
+`docs/specs/services.md`), so `authService.js` calls **Auth Service directly** at its own origin —
+`http://localhost:8001` (not `URLS.gateway.*`, not port 8000) — for `/auth/register`,
+`/auth/login`, `/auth/refresh`, `/auth/logout`, `/me`, `/admin/users*`. Request/response bodies are
+snake_case, matching `docs/specs/api-contracts.md` exactly (`phone_number`, `access_token`, ...) —
+don't camelCase them client-side before sending. CORS is already enabled on Auth Service
+(`origin: true`, dev-only permissive) so this works from the web build without extra config. Add a
+`URLS.auth = { origin: 'http://localhost:8001' }` (or similar) to `src/config/urls.js` rather than
+hardcoding the URL in the service — when the Gateway proxy eventually exists, swapping to it should
+be changing that one origin value, not rewriting `authService.js`.
 
 ## WebSocket (Socket.IO)
 
@@ -138,4 +150,6 @@ npx expo start --ios
 npx expo start --web
 ```
 
-Backend must be running at `localhost:8000` for the scraper tab to work.
+Backend must be running for the app to be useful: Gateway at `localhost:8000` (scraper tab, WS),
+Auth Service at `localhost:8001` (register/login/`/me`). Easiest way to get both running:
+`cd devops && docker compose up -d --build` — see root `CLAUDE.md`.

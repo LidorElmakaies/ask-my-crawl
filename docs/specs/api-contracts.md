@@ -4,7 +4,11 @@ All HTTP surface is **meant to be** exposed through the **Gateway** — no other
 directly from the frontend. **Current implementation status:** Auth Service is built and these
 routes are real, but it currently runs standalone on its own port (`8001`) — the Gateway does not
 yet proxy `/auth/*`, `/me`, `/admin/users*` to it (tracked as the next piece of work; see
-`services.md`). Error responses use `{ "error": { "code": "string", "message": "string" } }`.
+`services.md`). **Until that proxy exists, the frontend calls Auth Service directly** at its own
+origin (`http://localhost:8001`) for every route in this section — see `frontend/CLAUDE.md`'s
+"HTTP API" section. CORS is enabled permissively (`origin: true`) on both Gateway and Auth Service
+to support this during the Docker Compose dev phase — lock down to specific origins before any real
+deployment. Error responses use `{ "error": { "code": "string", "message": "string" } }`.
 
 ## Auth
 

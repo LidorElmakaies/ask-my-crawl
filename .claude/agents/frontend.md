@@ -25,10 +25,19 @@ This app is being extended from a single anonymous "paste a URL, get a scrape" s
 user-based app. Concretely, on top of the existing structure:
 
 - **Auth screens** (login/register) gating the rest of the app — no valid session, no access to the
-  crawl/results screens. `authSlice` (persisted, like `themeSlice`) already holds `accessToken`;
-  wire the login/register thunks to a new `authService.js` (see "Services Layer" below) that
-  dispatches `setAccessToken` on success. **The token is store-managed only — never render an
-  input field or any other UI for it.** It was removed once already; don't reintroduce it.
+  crawl/results screens. `authSlice` (persisted, like `themeSlice`) already holds `accessToken` —
+  **it needs a `refreshToken` field added too** (not there yet — register/login responses include
+  both per `api-contracts.md`, and `/auth/refresh` needs the stored refresh token to call). Wire
+  the login/register thunks to a new `authService.js` (see "Services Layer" below) that dispatches
+  `setAccessToken`/whatever you name the refresh-token setter on success. **The token is
+  store-managed only — never render an input field or any other UI for it.** It was removed once
+  already; don't reintroduce it.
+  - **`authService.js` calls Auth Service directly**, not the Gateway: `http://localhost:8001`
+    (own origin, own port) — the Gateway doesn't proxy `/auth/*` yet. Request/response bodies are
+    snake_case exactly as `api-contracts.md` documents (`phone_number`, `access_token`, ...); don't
+    translate case client-side. CORS is already enabled on Auth Service for this. Put the origin in
+    `src/config/urls.js` (e.g. `URLS.auth.origin`) so the eventual swap to the Gateway is a
+    one-line config change, not a rewrite.
 - **The scraper flow becomes async.** `scraperSlice`'s `submitScrapeRequest` currently expects an
   immediate response; per `docs/specs/api-contracts.md`, `POST /jobs` now returns `202` with a
   `job` in `status: "pending"` — the answer arrives later via the WebSocket push or a

@@ -41,6 +41,12 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
 - Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives).
 - Telegram account-linking flow (bot deep-link / linking code).
 - Gateway proxying `/auth/*`, `/me`, `/admin/users*` to Auth Service — Auth Service itself is done,
-  this wiring is the next piece of work.
+  this wiring is the next piece of work; until it exists, the frontend calls Auth Service directly
+  (see `api-contracts.md` / `frontend/CLAUDE.md`).
+- CORS is permissively open (`origin: true`) on Gateway and Auth Service for this dev phase — needs
+  locking down to specific origins before any real deployment.
+- Whether refresh tokens (or an access-token revocation list) should move to Redis for faster
+  lookups — if so, that's an Auth-Service-internal swap behind `IRefreshTokenRepository`, not
+  something the Gateway reaches into directly (breaks the per-service data-ownership rule).
 - URL-normalization edge cases (tracking params, redirect-following).
 - IaC tool (Terraform vs CDK) and CI/CD pipeline for AWS deployment.
