@@ -42,5 +42,8 @@ datasources:
       tracesToMetrics:
         datasourceUid: prometheus
         tags:
+          # The collector's Prometheus exporter maps service.name to the `job` label (with
+          # honor_labels: true on the scrape config so it isn't renamed to exported_job) — not
+          # `service`, which doesn't exist on these metrics at all.
           - key: service.name
-            value: service
+            value: job

@@ -3,3 +3,7 @@ export * from './tokens';
 export * from './user-role';
 export * from './interfaces/jwt-service.interface';
 export * from './interfaces/auth-token.interface';
+export * from './guards/jwt-auth.guard';
+export * from './guards/roles.guard';
+export * from './decorators/roles.decorator';
+export * from './decorators/current-user.decorator';

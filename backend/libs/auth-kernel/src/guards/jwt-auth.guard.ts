@@ -5,13 +5,14 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import {
-  AUTH_TOKEN_SERVICE,
-  type AuthTokenPayload,
-  type IAuthTokenService,
-} from '@app/auth-kernel';
 import type { Request } from 'express';
+import { AUTH_TOKEN_SERVICE } from '../tokens';
+import type { AuthTokenPayload } from '../interfaces/auth-token.interface';
+import type { IAuthTokenService } from '../interfaces/auth-token.interface';
 
+// Moved here from Auth Service once Gateway needed the identical guard for its own HTTP routes
+// (the /auth/* proxy, /me, /admin/users*) — was a straight copy-paste until then, zero
+// Auth-Service-specific logic in it even before the move.
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   constructor(

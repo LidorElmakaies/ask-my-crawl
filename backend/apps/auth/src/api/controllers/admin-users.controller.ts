@@ -10,13 +10,11 @@ import {
   Patch,
   UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard, Roles, RolesGuard } from '@app/auth-kernel';
 import { UpdateUserAdminDto } from '@app/dtos';
 import { USER_SERVICE } from '../../tokens';
 import type { IUserService } from '../../application/interfaces/user-service.interface';
-import { Roles } from '../decorators/roles.decorator';
 import { toUserResponse } from '../dto/user-response';
-import { JwtAuthGuard } from '../guards/jwt-auth.guard';
-import { RolesGuard } from '../guards/roles.guard';
 
 @Controller('admin/users')
 @UseGuards(JwtAuthGuard, RolesGuard)

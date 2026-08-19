@@ -5,7 +5,7 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { Test, TestingModule } from '@nestjs/testing';
 import jwt from 'jsonwebtoken';
 import { io, type Socket } from 'socket.io-client';
-import type { IRealtimeConnectionService } from '../src/application/interfaces/realtime-connection.interface';
+import type { IRealtimeConnectionService } from '../src/realtime/application/interfaces/realtime-connection.interface';
 import { GatewayModule } from '../src/gateway.module';
 import { REALTIME_CONNECTION_SERVICE } from '../src/tokens';
 

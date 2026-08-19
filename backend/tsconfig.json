@@ -33,6 +33,12 @@
       ],
       "@app/dtos/*": [
         "libs/dtos/src/*"
+      ],
+      "@app/otel": [
+        "libs/otel/src"
+      ],
+      "@app/otel/*": [
+        "libs/otel/src/*"
       ]
     }
   }

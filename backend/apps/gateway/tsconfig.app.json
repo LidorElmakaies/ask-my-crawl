@@ -2,7 +2,13 @@
   "extends": "../../tsconfig.json",
   "compilerOptions": {
     "declaration": false,
-    "outDir": "../../dist/apps/gateway"
+    // rootDir/outDir are pinned to the monorepo root so this app and the libs it imports land in
+    // one dist tree that mirrors the source tree (dist/apps/gateway/src/main.js,
+    // dist/libs/<lib>/src/*.js). `tsc-alias` then rewrites `@app/*` requires into relative paths
+    // that actually resolve at runtime — webpack used to inline those, it no longer does.
+    "rootDir": "../..",
+    "outDir": "../../dist",
+    "tsBuildInfoFile": "../../dist/.tsbuildinfo-gateway"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]

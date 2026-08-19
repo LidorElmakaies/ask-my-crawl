@@ -23,23 +23,30 @@ backend/                 NestJS monorepo — apps/ (gateway, auth; five more ser
                           libs/ (auth-kernel, dtos — shared code between apps)
 frontend/                 Expo / React Native app — see frontend/CLAUDE.md for details
 devops/                   docker-compose.yml (app stack) + observability/ (Grafana/Loki/
-                          Prometheus/Tempo/OTel — not yet wired to receive telemetry from
-                          the app stack; separate, unconnected compose project for now)
+                          Prometheus/Tempo/OTel — joined to the app stack via a shared Docker
+                          network; gateway/auth send real traces/logs/metrics here, see
+                          backend/libs/otel)
 docs/specs/               Formal specs — source of truth for how the system is supposed to work
 docs/planning/            Raw decision log — why things are the way they are
 ```
 
 ## What's actually implemented right now
 
-- **Gateway** (`backend/apps/gateway`) — Socket.IO realtime layer: authenticates the WS handshake
-  (JWT via `@app/auth-kernel`), pushes events to connected users. No HTTP routes yet.
+- **Gateway** (`backend/apps/gateway`) — Socket.IO realtime layer (authenticates the WS handshake
+  via `@app/auth-kernel`, pushes events to connected users) **plus** an HTTP proxy layer
+  (`src/auth-proxy/`) that fronts every Auth Service route: `/auth/*` (no guard — that's how you
+  get a token), `/me` (`JwtAuthGuard`), `/admin/users*` (`JwtAuthGuard` + `RolesGuard('admin')`).
+  Gateway checks the token/role locally first (fast-fail, no network call for an obviously bad
+  request), then forwards to Auth Service and relays its response verbatim — a thin pass-through,
+  not a translation layer, per `docs/specs/services.md`.
 - **Auth Service** (`backend/apps/auth`) — register/login/refresh/logout, `/me`, `/admin/users*`.
-  Full clean-architecture implementation, Postgres via TypeORM. Runs standalone on its own port —
-  **the Gateway does not yet proxy `/auth/*` to it** (tracked in `docs/specs/services.md`); the
-  frontend currently calls Auth Service directly at its own origin.
+  Full clean-architecture implementation, Postgres via TypeORM. Still runs on its own port
+  (`8001`), but only the Gateway calls it now — **the frontend never talks to any backend service
+  directly, only the Gateway** (a hard project rule, not just current wiring; see the `devops`
+  agent). Confirmed end-to-end, including that a request crossing the Gateway→Auth Service hop
+  produces one connected distributed trace, not two disconnected ones (`backend/libs/otel`).
 - **Not built yet**: Crawl Worker, Search Result Manager, Query/Answer Service, Notification
-  Service, Crawl Result Manager, the Gateway↔Auth Service proxy wiring, and the frontend's
-  login/register screens (in progress).
+  Service, Crawl Result Manager.
 
 ## Commands
 
@@ -61,20 +68,24 @@ npx expo start          # Expo Go / dev client
 npx expo start --web
 ```
 
-**Easiest way to run the whole backend + web frontend together**: Docker Compose.
+**Easiest way to run the whole backend + web frontend together**: Docker Compose. **Observability
+must come up first** — `devops/docker-compose.yml` references `devops/observability`'s Docker
+network as `external: true`, so `gateway`/`auth` fail to start without it already existing:
 ```bash
-cd devops
-docker compose up -d --build   # postgres, gateway (:8000), auth (:8001), frontend web preview (:8081)
+cd devops/observability && docker compose up -d   # Grafana (:3001), Loki, Prometheus, Tempo, OTel Collector
+cd .. && docker compose up -d --build              # postgres, gateway (:8000), auth (:8001), frontend (:8081)
 ```
-(`make up` also works if you have `make` installed — not guaranteed on bare Windows/PowerShell, see
-the `devops` agent.) Android/iOS still run via `npx expo start` locally, not containerized.
+`devops/` has no Makefile (removed deliberately — `make` isn't installed on this dev machine, see
+the `devops` agent) — the two-command sequence above, in that order, is the only way to bring it
+up. Android/iOS still run via `npx expo start` locally, not containerized.
 
-Observability stack (run from `devops/observability/`) — currently unconnected to the app stack,
-nothing emits telemetry yet:
+Observability alone (run from `devops/observability/`):
 ```bash
-make up                 # start Grafana (:3000) + Loki + Prometheus + Tempo + OTel Collector
+make up                 # start Grafana (:3001) + Loki + Prometheus + Tempo + OTel Collector
 make down
 ```
+Every observability image is version-pinned (not `:latest`) — see `devops.md` for why that matters
+concretely, not just as hygiene.
 
 ## Architecture
 
@@ -98,10 +109,17 @@ animated value → Gluestack `ThemeProvider`) — see `frontend/CLAUDE.md` for t
 before touching any of it; provider order in `app/_layout.js` is load-bearing and must not be
 reordered.
 
-**Observability** — self-contained OTel stack (`devops/observability/`): app → OTLP → Collector →
-Loki/Prometheus/Tempo → Grafana. Not yet connected to the app stack (`devops/docker-compose.yml`
-runs as a separate, unjoined compose project) and nothing currently emits telemetry — infrastructure
-for later, not active yet.
+**Observability** — `devops/observability/`: app → OTLP/gRPC → Collector → fans out to Loki (logs),
+Prometheus (metrics), Tempo (traces), all viewable in Grafana. `gateway`/`auth` both send real
+telemetry via the shared `backend/libs/otel` lib (traces + metrics + logs + a per-request log line
+via `createRequestLoggingMiddleware`) — verified end-to-end, not just wired: a real request
+produces a root-span trace in Tempo with real child spans (HTTP/pg/etc. auto-instrumentation), a
+log line in Loki correlated to it by `trace_id`, and per-route/per-status metrics in Prometheus.
+Two things worth knowing before touching this: (1) if the collector isn't reachable when an app
+boots, telemetry export just fails — `start-otel.ts` logs that failure via `diag`, but there's no
+retry buffer, so an outage means real data loss for its duration, not just a delay; (2) apps build
+with plain `tsc` + `tsc-alias`, not webpack — OTel's auto-instrumentation patches `require()` at
+runtime, which webpack bundling breaks.
 
 ## Key constraints to preserve
 
@@ -114,6 +132,9 @@ for later, not active yet.
   redux-persist, don't hand-write to AsyncStorage.
 - Expo 57 has breaking changes vs earlier versions; consult the versioned docs
   (https://docs.expo.dev/versions/v57.0.0/) before writing Expo/React Native code.
-- Once the Gateway proxies `/auth/*`, switch the frontend's Auth Service origin to the Gateway's —
-  that should be a one-line config change (`src/config/urls.js`), not a rewrite, thanks to the
-  services-layer pattern. Don't build anything that would make that swap harder.
+- **Done**: the Gateway proxies `/auth/*`/`/me`/`/admin/users*`, and the frontend was switched to
+  call it there — `src/config/urls.js`'s `URLS.auth.origin` is the Gateway's own origin now, not
+  Auth Service's. Confirms the services-layer pattern paid off here: it really was the one-line
+  change the docs anticipated, `authService.js` itself didn't change at all. The frontend never
+  talks to any backend service directly, only the Gateway — a hard project rule, not just current
+  wiring; don't build anything that bypasses it without asking first.

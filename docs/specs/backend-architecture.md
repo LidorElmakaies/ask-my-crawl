@@ -36,32 +36,34 @@ specific libraries and external systems.
 
 ## Folder structure — each layer owns an `interfaces/` subfolder for what *it* implements
 
+This is `apps/auth/src/` — flat at the app root, no extra nesting (Auth Service is single-concern;
+see "Single-concern vs. multi-concern apps" below for when a named subfolder *is* warranted):
+
 ```
 src/
   models/                             # domain layer — see below. No framework imports, ever.
     user.ts                          # User, PublicUser, UserRole, toPublicUser()
     refresh-token.ts                 # RefreshToken
-  auth/
-    api/
-      auth.controller.ts             # depends on IAuthService, not AuthService
-      dto/
-        register-request.dto.ts      # shape of what the FRONTEND sends this endpoint —
+  api/
+    auth.controller.ts               # depends on IAuthService, not AuthService
+    dto/
+      register-request.dto.ts        # shape of what the FRONTEND sends this endpoint —
                                       # Gateway-only, lives here, not in a shared lib (see DTOs below)
-    application/
-      auth.service.ts                # class AuthService implements IAuthService
-      interfaces/
-        auth-service.interface.ts    # IAuthService — implemented by AuthService,
+  application/
+    auth.service.ts                  # class AuthService implements IAuthService
+    interfaces/
+      auth-service.interface.ts      # IAuthService — implemented by AuthService,
                                       # consumed by the API layer
-    infrastructure/
-      interfaces/
-        user-repository.interface.ts     # IUserRepository — implemented by PostgresUserRepository,
-                                          # consumed by the Application layer
-        password-hasher.interface.ts     # IPasswordHasher — implemented by SaltPepperSha256Hasher
-      postgres/
-        postgres-user.repository.ts      # implements IUserRepository
-      hashing/
-        salt-pepper-sha256.hasher.ts     # implements IPasswordHasher, per auth.md's formula
-    auth.module.ts                   # binds every token: AUTH_SERVICE, USER_REPOSITORY, PASSWORD_HASHER
+  infrastructure/
+    interfaces/
+      user-repository.interface.ts     # IUserRepository — implemented by PostgresUserRepository,
+                                        # consumed by the Application layer
+      password-hasher.interface.ts     # IPasswordHasher — implemented by SaltPepperSha256Hasher
+    postgres/
+      postgres-user.repository.ts      # implements IUserRepository
+    hashing/
+      salt-pepper-sha256.hasher.ts     # implements IPasswordHasher, per auth.md's formula
+  auth.module.ts                     # binds every token: AUTH_SERVICE, USER_REPOSITORY, PASSWORD_HASHER
 ```
 
 Rule of thumb: **an interface lives in the `interfaces/` folder of the layer whose class implements
@@ -95,6 +97,62 @@ was actually a domain model in disguise and belongs in `models/` after all.
 writing one new class in `infrastructure/` and changing one line in `auth.module.ts`'s `providers`
 array; `auth.service.ts` and its tests don't change. Same for `auth.controller.ts` if `AuthService`
 itself were ever swapped for an alternate implementation of `IAuthService`.
+
+## Single-concern vs. multi-concern apps
+
+The three-layer structure above is always required. Where it sits — flat at `src/` root, or
+nested inside a named folder — depends on whether the app has **one** cohesive concern or
+**several unrelated ones**. Most apps have one; decide per app, don't default to nesting "to be
+safe" or flatten a genuinely multi-concern app "to be simple."
+
+**Default — single concern (Auth, and every future service except where genuinely proven
+otherwise): flat.** One `models/`, `api/`, `application/`, `infrastructure/` at the app's `src/`
+root, one `<service>.module.ts` binding all their tokens. This is Auth Service's actual layout
+today — `apps/auth/src/{models,api,application,infrastructure}`, no extra nesting — because
+registering/authenticating/managing users is one bounded concern, however many files it takes.
+Crawl Worker's pipeline (visited-set claim, cache check, fetch, clean, BFS expansion, fan-in
+counter) is complex internally but is still **one** concern end to end — it stays flat too, the
+same way. Complexity of a concern isn't the trigger for nesting; a second, unrelated concern is.
+
+**Exception — multi-concern (Gateway today, possibly nothing else): each concern gets its own
+folder**, each with its own `api/`/`application/`/`infrastructure/` (and its own `models/` only if
+that concern actually owns domain data — Gateway's don't, both are thin). The app's top-level
+`<service>.module.ts` does nothing but import each concern's own `<concern>.module.ts`; it owns no
+providers itself. Gateway qualifies because it's the system's edge, explicitly designed (per
+`services.md`) to front multiple downstream concerns that share nothing:
+
+```
+apps/gateway/src/
+  realtime/                          # WS connection registry — owns nothing, ephemeral
+    api/realtime.gateway.ts
+    application/realtime-connection.service.ts
+    application/interfaces/realtime-connection.interface.ts
+    infrastructure/websocket/in-memory-connection-store.ts
+    infrastructure/interfaces/connection-store.interface.ts
+    realtime.module.ts
+  auth-proxy/                        # HTTP forward-and-relay to Auth Service — owns nothing
+    api/{auth-proxy,me-proxy,admin-users-proxy}.controller.ts
+    application/auth-proxy.service.ts
+    application/interfaces/auth-proxy-service.interface.ts
+    infrastructure/auth-service-http.client.ts
+    infrastructure/interfaces/auth-service-client.interface.ts
+    auth-proxy.module.ts
+  tokens.ts                          # DI tokens for every concern, centralized (see below)
+  gateway.module.ts                  # imports RealtimeModule + AuthProxyModule, owns nothing else
+```
+
+**The test, when it's not obvious: would these concerns ever share a model, an Application
+service, or an Infrastructure adapter — or would one ever call the other?** If no to all three,
+they're independent and each gets its own folder. If a future concern (e.g. a `jobs-proxy/` for
+`POST/GET /jobs*` → Crawl Result Manager, per `services.md`) is added to Gateway, it follows the
+identical shape as a third sibling folder, not a special case.
+
+**DI tokens for a multi-concern app stay in one file at the app root** (`tokens.ts`), grouped by
+concern with a comment, not split into a `tokens.ts` per concern folder — one registry per app
+mirrors the single-concern case (Auth Service also has exactly one `tokens.ts`) and avoids
+guessing which concern's file a token lives in. Each concern's files reference it by relative
+import (`../../tokens` from two levels down); nothing about the shared file couples the concerns
+to each other.
 
 ## NestJS wiring convention
 

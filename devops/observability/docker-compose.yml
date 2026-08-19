@@ -1,6 +1,8 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:latest
+    # Pinned, not :latest — see the tempo entry below for why this matters concretely, not just
+    # in the abstract.
+    image: otel/opentelemetry-collector-contrib:0.159.0
     command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
@@ -22,7 +24,7 @@ services:
         max-file: "3"
 
   loki:
-    image: grafana/loki:latest
+    image: grafana/loki:3.7.6
     command: ["-config.file=/etc/loki/config.yaml"]
     volumes:
       - ./loki/config.yaml:/etc/loki/config.yaml:ro
@@ -39,12 +41,15 @@ services:
         max-file: "3"
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.14.0
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
+      # Tempo's metrics_generator (service-graphs/span-metrics, see tempo/config.yaml) remote-writes
+      # here. Without this flag it 404s continuously the moment real traces start arriving.
+      - "--web.enable-remote-write-receiver"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./data/prometheus:/prometheus
@@ -60,7 +65,13 @@ services:
         max-file: "3"
 
   tempo:
-    image: grafana/tempo:latest
+    # Pinned — :latest silently drifted to Tempo 3.0 at some point, which restructured the
+    # top-level config schema (ingester/compactor top-level keys no longer exist; 3.x moved to a
+    # Kafka-backed live_store/block_builder/backend_scheduler architecture). tempo/config.yaml
+    # here is written for the 2.x "monolithic, local storage, no Kafka" schema on purpose — this
+    # pin keeps that valid instead of chasing 3.x's architecture. Confirmed 2.10.8 (latest 2.x,
+    # still receiving security patches) starts cleanly against the existing config unchanged.
+    image: grafana/tempo:2.10.8
     command: ["-config.file=/etc/tempo/config.yaml"]
     volumes:
       - ./tempo/config.yaml:/etc/tempo/config.yaml:ro
@@ -77,12 +88,15 @@ services:
         max-file: "3"
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:13.2.0
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./data/grafana:/var/lib/grafana
     ports:
-      - "3000:3000"   # External dashboard access
+      # Host port 3001, not 3000 — an unrelated process on the dev machine already holds host
+      # :3000 (confirmed via `Get-Process` before remapping, not touched/killed). Container's own
+      # port stays 3000 internally; only the host-side mapping changed.
+      - "3001:3000"   # External dashboard access — http://localhost:3001
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
@@ -105,3 +119,8 @@ services:
 networks:
   observability:
     driver: bridge
+    # Pinned name (compose would otherwise prefix it with the project name, i.e.
+    # `observability_observability`). This stack OWNS the network; devops/docker-compose.yml
+    # attaches to it as `external: true, name: observability` so the app services can reach
+    # otel-collector:4317. Renaming this breaks that join.
+    name: observability

@@ -18,7 +18,8 @@ service in `docs/specs/services.md`:
 ```
 backend/
   apps/
-    gateway/              # implemented — realtime/WS via Socket.IO
+    gateway/              # implemented — realtime/WS via Socket.IO, plus HTTP proxy to Auth
+                          # Service (src/auth-proxy/): /auth/*, /me, /admin/users*
     auth/                 # implemented — register/login/refresh/logout, /me, /admin/users*
     crawl-worker/
     search-result-manager/

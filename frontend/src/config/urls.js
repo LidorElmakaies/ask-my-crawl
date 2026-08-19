@@ -1,10 +1,5 @@
 const BASE_URL = 'http://localhost:8000';
 
-// Auth Service's own origin — the Gateway doesn't proxy /auth/* yet (see docs/specs/services.md),
-// so authService.js calls this directly instead of going through BASE_URL. Once the Gateway proxy
-// exists, this should be the only line that needs to change.
-const AUTH_ORIGIN = 'http://localhost:8001';
-
 export const URLS = {
   base: BASE_URL,
   gateway: {
@@ -14,7 +9,12 @@ export const URLS = {
     wsOrigin: BASE_URL,
     wsPath: '/ws',
   },
+  // The Gateway now proxies /auth/*, /me, /admin/users* to Auth Service (docs/specs/services.md)
+  // — this is the Gateway's own origin, same as `base`, not Auth Service's. The frontend never
+  // talks to Auth Service (or any backend service) directly; only through the Gateway. This used
+  // to be Auth Service's own origin as a documented stopgap — that's gone now, this is the whole
+  // reason it was kept as a separate config entry instead of being inlined as `base` everywhere.
   auth: {
-    origin: AUTH_ORIGIN,
+    origin: BASE_URL,
   },
 };

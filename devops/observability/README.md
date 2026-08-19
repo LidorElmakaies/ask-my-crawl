@@ -18,9 +18,11 @@ OpenTelemetry Collector
    ├── Metrics ──────────────► Prometheus  (metrics storage & query)
    └── Traces  ──────────────► Tempo  (trace storage & query)
                                     ▲
-                               Grafana  :3000
+                               Grafana  :3001*
                           (unified dashboard UI)
 ```
+\* host port — container's internal port is still 3000; remapped because another process on the
+dev machine already held host `:3000`.
 
 ### Components
 
@@ -48,7 +50,7 @@ cd devops/observability
 make up
 ```
 
-Grafana will be available at **http://localhost:3000** (user: `admin`, password: `admin`).
+Grafana will be available at **http://localhost:3001** (user: `admin`, password: `admin`).
 
 ---
 
@@ -100,7 +102,7 @@ Service names for `restart` and `logs-*`: `otel-collector`, `loki`, `prometheus`
 
 ## Grafana — exploring your data
 
-Open **http://localhost:3000** and use the **Explore** view (compass icon in the sidebar).
+Open **http://localhost:3001** and use the **Explore** view (compass icon in the sidebar).
 
 | What you want to see | Data source to select | Example query |
 |---|---|---|

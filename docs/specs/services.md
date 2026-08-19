@@ -51,8 +51,9 @@ table read/write.
 
 ## Auth Service
 
-**Implemented** (`backend/apps/auth`) — runs standalone on port 8001 today; the Gateway proxy
-wiring below is the next piece of work, not yet done.
+**Implemented** (`backend/apps/auth`) — Gateway proxies every route below (`backend/apps/gateway/
+src/auth-proxy/`); Auth Service is no longer reachable from the frontend directly, only from the
+Gateway (still on its own port, 8001, but that's server-to-server now, not browser-facing).
 
 - **Owns**: `users`, `refresh_tokens`.
 - **Responsibilities**: registration (hash password per `auth.md`), login, refresh-token issuance +
@@ -113,5 +114,12 @@ wiring below is the next piece of work, not yet done.
 (Gateway↔Auth, Gateway↔Crawl Result Manager, Crawl Worker↔Search Result Manager,
 Query/Answer↔Search Result Manager, Notification↔Auth) — not NestJS's TCP microservice transport.
 Simpler, and each callee's controllers already implement the relevant `api-contracts.md` paths
-directly, so the caller (e.g. Gateway) is a thin proxy rather than a translation layer. Not yet
-wired for Auth Service specifically — Gateway calling it via HTTP is the next piece of work.
+directly, so the caller (e.g. Gateway) is a thin proxy rather than a translation layer.
+**Implemented for Gateway↔Auth Service** — a generic forward-and-relay (one `IAuthProxyService.
+forward()` method behind `/auth/*`, `/me`, `/admin/users*`, not one translation method per route),
+via `@nestjs/axios`'s `HttpModule`. Gateway's own `JwtAuthGuard`/`RolesGuard` (shared from
+`@app/auth-kernel`, not reimplemented) reject an invalid/missing token or wrong role locally
+before ever calling Auth Service — Auth Service's own guards then re-verify independently
+(defense in depth, not redundant). Verified end-to-end including that a request crossing this hop
+is a single connected distributed trace (Gateway's span → Auth Service's span → its `pg` spans →
+back), not two disconnected ones — see `backend/libs/otel`.

@@ -6,7 +6,7 @@ import {
 } from '@nestjs/websockets';
 import type { DefaultEventsMap, Server, Socket } from 'socket.io';
 import { AUTH_TOKEN_SERVICE, type IAuthTokenService } from '@app/auth-kernel';
-import { REALTIME_CONNECTION_SERVICE } from '../tokens';
+import { REALTIME_CONNECTION_SERVICE } from '../../tokens';
 import type { IRealtimeConnectionService } from '../application/interfaces/realtime-connection.interface';
 
 interface SocketData {

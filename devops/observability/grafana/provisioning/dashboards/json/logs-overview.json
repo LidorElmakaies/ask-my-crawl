@@ -1,0 +1,102 @@
+{
+  "id": null,
+  "uid": "askmycrawl-logs-overview",
+  "title": "askmycrawl — Logs by Severity",
+  "description": "Project-wide logs split into Error / Warning / Info, across every service that sends via backend/libs/otel's OtelLogger.",
+  "tags": ["askmycrawl", "otel", "logs"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "label": "Service",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": { "query": "label_values(service_name)", "refId": "service" },
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": { "text": "All", "value": "$__all" },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Overview", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+
+    {
+      "id": 1, "type": "stat", "title": "Errors (window)",
+      "gridPos": { "x": 0, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=~\"ERROR|FATAL\" [$__range]))", "legendFormat": "errors" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "red" }, "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 }
+      ] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Warnings (window)",
+      "gridPos": { "x": 8, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"WARN\" [$__range]))", "legendFormat": "warnings" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "orange" }, "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 1 }
+      ] } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Info (window)",
+      "gridPos": { "x": 16, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "sum(count_over_time({service_name=~\"$service\"} | severity_text=\"INFO\" [$__range]))", "legendFormat": "info" }],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
+      "options": { "graphMode": "none", "colorMode": "value" }
+    },
+
+    {
+      "id": 4, "type": "timeseries", "title": "Log volume by severity",
+      "gridPos": { "x": 0, "y": 5, "w": 24, "h": 7 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "sum by (severity_text) (count_over_time({service_name=~\"$service\"} [$__interval]))", "legendFormat": "{{severity_text}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [
+        { "matcher": { "id": "byName", "options": "ERROR" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+        { "matcher": { "id": "byName", "options": "WARN" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+        { "matcher": { "id": "byName", "options": "INFO" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] }
+      ] },
+      "options": { "stacking": { "mode": "normal" } }
+    },
+
+    { "id": 101, "type": "row", "title": "Errors", "gridPos": { "x": 0, "y": 12, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 5, "type": "logs", "title": "Error logs (ERROR + FATAL)",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 9 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{service_name=~\"$service\"} | severity_text=~\"ERROR|FATAL\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+
+    { "id": 102, "type": "row", "title": "Warnings", "gridPos": { "x": 0, "y": 22, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 6, "type": "logs", "title": "Warning logs",
+      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 9 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{service_name=~\"$service\"} | severity_text=\"WARN\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+
+    { "id": 103, "type": "row", "title": "Info", "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 7, "type": "logs", "title": "Info logs",
+      "gridPos": { "x": 0, "y": 33, "w": 24, "h": 9 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{service_name=~\"$service\"} | severity_text=\"INFO\"", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    }
+  ]
+}

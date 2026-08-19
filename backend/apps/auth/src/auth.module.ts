@@ -1,12 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { AuthKernelModule } from '@app/auth-kernel';
+import { AuthKernelModule, JwtAuthGuard, RolesGuard } from '@app/auth-kernel';
 import { AdminUsersController } from './api/controllers/admin-users.controller';
 import { AuthController } from './api/controllers/auth.controller';
 import { UsersController } from './api/controllers/users.controller';
-import { JwtAuthGuard } from './api/guards/jwt-auth.guard';
-import { RolesGuard } from './api/guards/roles.guard';
 import { AuthService } from './application/auth.service';
 import { UserService } from './application/user.service';
 import { SaltPepperSha256Hasher } from './infrastructure/hashing/salt-pepper-sha256.hasher';

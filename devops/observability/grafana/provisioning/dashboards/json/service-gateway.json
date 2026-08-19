@@ -1,0 +1,108 @@
+{
+  "id": null,
+  "uid": "askmycrawl-service-gateway",
+  "title": "askmycrawl — gateway",
+  "description": "gateway service — metrics, traces, and logs in one place. No Database row: gateway doesn't touch Postgres. Copy this file for a new service (see .claude/agents/devops.md's Grafana dashboard section).",
+  "tags": ["askmycrawl", "otel", "service", "gateway"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Overview", "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 1, "type": "stat", "title": "Request rate",
+      "gridPos": { "x": 0, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(otelcol_http_server_request_duration_seconds_count{job=\"gateway\"}[$__rate_interval]))", "legendFormat": "req/s" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 }, "overrides": [] },
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Error rate (5xx)",
+      "gridPos": { "x": 8, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "100 * (sum(rate(otelcol_http_server_request_duration_seconds_count{job=\"gateway\", http_response_status_code=~\"5..\"}[$__rate_interval])) or vector(0)) / sum(rate(otelcol_http_server_request_duration_seconds_count{job=\"gateway\"}[$__rate_interval]))", "legendFormat": "5xx %" }],
+      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }
+      ] } }, "overrides": [] },
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "p95 latency",
+      "gridPos": { "x": 16, "y": 1, "w": 8, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le) (rate(otelcol_http_server_request_duration_seconds_bucket{job=\"gateway\"}[$__rate_interval])))", "legendFormat": "p95" }],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 }, "overrides": [] },
+      "options": { "graphMode": "area", "colorMode": "value" }
+    },
+
+    { "id": 101, "type": "row", "title": "HTTP", "gridPos": { "x": 0, "y": 5, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 4, "type": "timeseries", "title": "Request rate by route",
+      "gridPos": { "x": 0, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (http_route, http_request_method) (rate(otelcol_http_server_request_duration_seconds_count{job=\"gateway\"}[$__rate_interval]))", "legendFormat": "{{http_request_method}} {{http_route}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Latency percentiles (p50 / p95 / p99)",
+      "gridPos": { "x": 12, "y": 6, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(otelcol_http_server_request_duration_seconds_bucket{job=\"gateway\"}[$__rate_interval])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(otelcol_http_server_request_duration_seconds_bucket{job=\"gateway\"}[$__rate_interval])))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(otelcol_http_server_request_duration_seconds_bucket{job=\"gateway\"}[$__rate_interval])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Errors by status code (4xx / 5xx)",
+      "gridPos": { "x": 0, "y": 14, "w": 24, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (http_route, http_response_status_code) (rate(otelcol_http_server_request_duration_seconds_count{job=\"gateway\", http_response_status_code=~\"4..|5..\"}[$__rate_interval]))", "legendFormat": "{{http_route}} [{{http_response_status_code}}]" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+
+    { "id": 103, "type": "row", "title": "Node runtime", "gridPos": { "x": 0, "y": 21, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 8, "type": "timeseries", "title": "Event loop delay (p50 / p99)",
+      "gridPos": { "x": 0, "y": 22, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "otelcol_nodejs_eventloop_delay_p50_seconds{job=\"gateway\"}", "legendFormat": "p50" },
+        { "expr": "otelcol_nodejs_eventloop_delay_p99_seconds{job=\"gateway\"}", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "GC time by type",
+      "gridPos": { "x": 12, "y": 22, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum by (v8js_gc_type) (rate(otelcol_v8js_gc_duration_seconds_sum{job=\"gateway\"}[$__rate_interval]))", "legendFormat": "{{v8js_gc_type}}" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+
+    { "id": 104, "type": "row", "title": "Traces", "gridPos": { "x": 0, "y": 30, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 10, "type": "table", "title": "Recent traces",
+      "description": "Click a Trace ID to open the full trace. Deliberately a table, not the native 'traces' panel type — see service-auth.json's identical panel for why.",
+      "gridPos": { "x": 0, "y": 31, "w": 24, "h": 10 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [{ "queryType": "traceql", "query": "{resource.service.name=\"gateway\"}", "limit": 20, "refId": "A" }],
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "showHeader": true, "sortBy": [{ "displayName": "Start time", "desc": true }] }
+    },
+
+    { "id": 105, "type": "row", "title": "Logs", "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 }, "collapsed": false, "panels": [] },
+    {
+      "id": 11, "type": "logs", "title": "Logs",
+      "gridPos": { "x": 0, "y": 42, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "expr": "{service_name=\"gateway\"}", "refId": "A" }],
+      "options": { "showTime": true, "showLabels": false, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    }
+  ]
+}

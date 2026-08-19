@@ -39,11 +39,22 @@ services:
       dockerfile: apps/gateway/Dockerfile
     env_file:
       - ../backend/.env
+    environment:
+      # Auth Service, by container service name — Gateway proxies /auth/*, /me, /admin/users* to
+      # it (see docs/specs/services.md). This is also the code default (auth-service-http.client.ts)
+      # but set explicitly here, same as auth's DATABASE_URL override below, rather than relying
+      # on the fallback matching by coincidence.
+      - AUTH_SERVICE_URL=http://auth:8001
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the networks block at the bottom of this file).
+      - OTEL_SERVICE_NAME=gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     ports:
       - "8000:8000"
     restart: unless-stopped
     networks:
       - askmycrawl
+      - observability
     logging:
       driver: json-file
       options:
@@ -60,6 +71,10 @@ services:
       # Overrides the .env file's localhost-based default — container-to-container calls use
       # the service name, not localhost.
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl_auth
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the networks block at the bottom of this file).
+      - OTEL_SERVICE_NAME=auth
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     ports:
       - "8001:8001"
     depends_on:
@@ -68,6 +83,7 @@ services:
     restart: unless-stopped
     networks:
       - askmycrawl
+      - observability
     logging:
       driver: json-file
       options:
@@ -91,5 +107,17 @@ services:
         max-file: "3"
 
 networks:
-  askmycrawl:
+  askmycrawl:            # internal service-to-service (Postgres, and the services themselves)
     driver: bridge
+
+  # Owned by devops/observability/docker-compose.yml — referenced here, not created here, so
+  # gateway/auth can reach `otel-collector:4317` by service name.
+  #
+  # ORDERING GOTCHA: an external network must already exist. If `devops/observability` has never
+  # been started, `docker compose up` here fails with "network observability not found". Bring the
+  # telemetry stack up first, every time, no tooling enforces this — see the `devops` agent:
+  #     cd observability && docker compose up -d
+  #     cd .. && docker compose up -d --build
+  observability:
+    external: true
+    name: observability

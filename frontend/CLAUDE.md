@@ -47,8 +47,8 @@ src/
   theme/
     colors.js         # Dual palettes: dark (indigo/cyan) + light (indigo/teal)
   config/
-    urls.js           # BASE_URL, URLS.gateway.scrape, URLS.gateway.wsOrigin/wsPath —
-                       # needs URLS.auth.origin added for Auth Service (see "HTTP API" below)
+    urls.js           # BASE_URL, URLS.gateway.scrape, URLS.gateway.wsOrigin/wsPath,
+                       # URLS.auth.origin (see "HTTP API" below) — all the Gateway's own origin
 ```
 
 ## Theme System
@@ -96,16 +96,16 @@ validation beyond non-empty. `scraperSlice.submitScrapeRequest({ url, query })` 
 (calls `scraperService`). Results are **not persisted** — cleared on reload or via
 `clearScraper()`.
 
-**Auth — different origin, for now.** The Gateway doesn't proxy `/auth/*` yet (see
-`docs/specs/services.md`), so `authService.js` calls **Auth Service directly** at its own origin —
-`http://localhost:8001` (not `URLS.gateway.*`, not port 8000) — for `/auth/register`,
-`/auth/login`, `/auth/refresh`, `/auth/logout`, `/me`, `/admin/users*`. Request/response bodies are
-snake_case, matching `docs/specs/api-contracts.md` exactly (`phone_number`, `access_token`, ...) —
-don't camelCase them client-side before sending. CORS is already enabled on Auth Service
-(`origin: true`, dev-only permissive) so this works from the web build without extra config. Add a
-`URLS.auth = { origin: 'http://localhost:8001' }` (or similar) to `src/config/urls.js` rather than
-hardcoding the URL in the service — when the Gateway proxy eventually exists, swapping to it should
-be changing that one origin value, not rewriting `authService.js`.
+**Auth — through the Gateway, same origin as everything else.** The Gateway proxies `/auth/*`,
+`/me`, `/admin/users*` to Auth Service (`docs/specs/services.md`) — `authService.js` calls
+`URLS.auth.origin`, which is the Gateway's own origin (`http://localhost:8000`, same as
+`URLS.gateway.*`), not Auth Service's. The frontend never talks to Auth Service (or any backend
+service) directly, only the Gateway — this used to be a documented stopgap (Auth Service's own
+origin, port 8001) exactly because the proxy didn't exist yet; it's gone now, and `authService.js`
+itself didn't need to change at all when it did — only `URLS.auth.origin`'s value, confirming the
+services-layer pattern did what it was meant to. Request/response bodies stay snake_case, matching
+`docs/specs/api-contracts.md` exactly (`phone_number`, `access_token`, ...) — don't camelCase them
+client-side before sending.
 
 ## WebSocket (Socket.IO)
 
@@ -138,7 +138,7 @@ Order matters — do not reorder providers.
 - **Build shared UI as components in `src/components/`, not duplicated per-screen markup** — e.g. a single reusable input-field component used by the URL/query submission screen, register, and login, rather than each screen hand-rolling its own `TextInput`. See [../.claude/agents/frontend.md](../.claude/agents/frontend.md)'s "Build for reuse" section.
 - **All I/O goes through `src/services/`, called only from thunks** — see "Services Layer" above. Never inline a `fetch`/`socket.io-client` call in a thunk or a component.
 - **Scraper state is ephemeral** — do not add persistence to `scraperSlice`.
-- **The access token is never shown or manually entered in the UI** — `authSlice` is store-managed only, set by the real login flow once it exists.
+- **The access token is never shown or manually entered in the UI** — `authSlice` is store-managed only, set by the real login/register thunks.
 - **Theme persistence is automatic** — `redux-persist` handles it; do not manually write to AsyncStorage.
 - Tab icons follow the `<name>-outline` / `<name>` Ionicons pattern for inactive/active states.
 - Custom tab bar lives in `app/(tabs)/_layout.js` — the `CustomTabBar` component uses `progress.interpolate()` for smooth color transitions, not `useAppTheme()` directly.
@@ -152,6 +152,7 @@ npx expo start --ios
 npx expo start --web
 ```
 
-Backend must be running for the app to be useful: Gateway at `localhost:8000` (scraper tab, WS),
-Auth Service at `localhost:8001` (register/login/`/me`). Easiest way to get both running:
-`cd devops && docker compose up -d --build` — see root `CLAUDE.md`.
+Backend must be running for the app to be useful — the frontend only ever talks to the Gateway at
+`localhost:8000` (scraper tab, WS, and now register/login/`/me` too, proxied to Auth Service).
+Easiest way to bring the whole backend up: `cd devops/observability && docker compose up -d`, then
+`cd .. && docker compose up -d --build` (observability must come up first — see root `CLAUDE.md`).

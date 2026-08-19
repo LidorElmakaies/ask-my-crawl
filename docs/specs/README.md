@@ -33,18 +33,20 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
   built from reusable components (shared input fields etc. across screens) rather than per-screen markup.
 - **Deployment**: Docker Compose for now (`devops/docker-compose.yml`, alongside the existing
   `devops/observability/`) — AWS is a documented future phase, not the current target. See the
-  `devops` agent.
+  `devops` agent for how it's built/extended (including OpenTelemetry wiring, Grafana dashboards)
+  and [devops/observability/README.md](../../devops/observability/README.md) for how to run and
+  use the observability stack day to day.
 
 ## Still open (tracked, not blocking)
 
 - LLM + embedding model provider (affects `vector` column dimension in the data model).
 - Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives).
 - Telegram account-linking flow (bot deep-link / linking code).
-- Gateway proxying `/auth/*`, `/me`, `/admin/users*` to Auth Service — Auth Service itself is done,
-  this wiring is the next piece of work; until it exists, the frontend calls Auth Service directly
-  (see `api-contracts.md` / `frontend/CLAUDE.md`).
-- CORS is permissively open (`origin: true`) on Gateway and Auth Service for this dev phase — needs
-  locking down to specific origins before any real deployment.
+- CORS is permissively open (`origin: true`) on the Gateway for this dev phase — needs locking
+  down to specific origins before any real deployment. Auth Service's own CORS is now dead config
+  worth removing (or its host port unpublished) rather than tightening — since the Gateway now
+  proxies every route, nothing browser-side calls Auth Service directly anymore, so CORS is moot
+  there; not done yet, flagging rather than silently deciding either way.
 - Whether refresh tokens (or an access-token revocation list) should move to Redis for faster
   lookups — if so, that's an Auth-Service-internal swap behind `IRefreshTokenRepository`, not
   something the Gateway reaches into directly (breaks the per-service data-ownership rule).

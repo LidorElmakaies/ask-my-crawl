@@ -1,4 +1,4 @@
-# Build context is backend/ (the Nest monorepo root) — `nest build gateway` needs the whole
+# Build context is backend/ (the Nest monorepo root) — `npm run build:gateway` needs the whole
 # monorepo (nest-cli.json, tsconfig, shared libs), not just this app's folder.
 #
 #   docker build -f apps/gateway/Dockerfile -t askmycrawl-gateway .
@@ -10,17 +10,22 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
-RUN npx nest build gateway
+# Webpack is disabled (nest-cli.json) so OTel's require()-hook auto-instrumentation actually works
+# — it can't patch a call a bundler inlined. Consequences, all handled by this one script:
+#   1. libs are compiled separately into dist/libs/* (webpack used to inline them), and
+#   2. tsc-alias rewrites the @app/* path aliases in the emitted JS into real relative requires.
+RUN npm run build:gateway
 
-# nest-cli.json has webpack:true, but the webpack build treats node_modules as external
-# (standard Nest behavior, keeps the bundle small) — so the runtime image still needs a real
-# npm install, just prod-only.
+# The build treats node_modules as external, so the runtime image still needs a real npm install,
+# just prod-only.
 FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm install --omit=dev
 COPY --from=builder /app/dist/apps/gateway ./dist/apps/gateway
+# Required: the rewritten relative requires in dist/apps/gateway point into here.
+COPY --from=builder /app/dist/libs ./dist/libs
 
 EXPOSE 8000
-CMD ["node", "dist/apps/gateway/main.js"]
+CMD ["node", "dist/apps/gateway/src/main.js"]
