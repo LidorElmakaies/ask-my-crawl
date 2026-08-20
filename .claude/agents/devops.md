@@ -16,8 +16,10 @@ monorepo — see the `backend` agent). **`gateway` and `auth` are real and runni
 five don't exist yet. Plus a **web preview** of the frontend — a static `expo export --platform
 web` build served by Caddy (`frontend/Dockerfile` + `frontend/Caddyfile`). Android/iOS are not
 containerized (nothing to gain — no compiled runtime to isolate, and it actively breaks
-phone/simulator connectivity) and still run via `npx expo start` locally. Kafka and Redis aren't in
-the stack yet — nothing depends on them until Crawl Worker exists.
+phone/simulator connectivity) and still run via `npx expo start` locally. **Kafka is up** (broker +
+explicit topic creation, see below) — no service produces/consumes yet, since Crawl Worker (the
+first consumer) doesn't exist. Redis still isn't in the stack — nothing depends on it until Crawl
+Worker exists.
 
 ## Docker Compose — implemented, running today
 
@@ -29,6 +31,8 @@ the stack yet — nothing depends on them until Crawl Worker exists.
 | `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime + HTTP proxy to Auth Service (`/auth/*`, `/me`, `/admin/users*`); CORS enabled (`origin: true`, dev-permissive) |
 | `auth` | `backend/apps/auth/Dockerfile` | 8001 | Called only by the Gateway now (server-to-server) — the frontend never reaches this directly, that's a hard project rule. CORS still enabled (`origin: true`) but is dead config at this point; port still published to the host for direct debugging/curl, not because anything else needs it — worth reconsidering both, not done yet |
 | `frontend` | `frontend/Dockerfile` | 8081 | Caddy serving the static web export |
+| `kafka` | `apache/kafka:4.3.1` | 9092 (host, via `PLAINTEXT_HOST`) | Single-broker KRaft (combined broker+controller), no Zookeeper. In-network services use `kafka:19092` (`PLAINTEXT` listener); `9092`/`PLAINTEXT_HOST` is for host-side debugging tools only. No service produces/consumes yet — see "Kafka" section below |
+| `kafka-init` | `apache/kafka:4.3.1` | — | One-off: creates every topic in `docs/specs/event-schemas.md`'s table explicitly (`kafka-topics.sh --create`), then exits. Runs after `kafka` reports healthy (`depends_on: condition: service_healthy`), not just started |
 
 - **Done**: joined to `devops/observability/`'s network, `gateway`/`auth` send real OTel telemetry
   — see the "OpenTelemetry" section below for the full picture, including two real bugs found and
@@ -36,9 +40,9 @@ the stack yet — nothing depends on them until Crawl Worker exists.
   up yet (mitigated by always bringing `devops/observability` up *first* — see "Startup order"
   below), and `:latest` image tags that had silently drifted Tempo onto an incompatible config
   schema (every observability image is pinned now).
-- Kafka topics / KRaft-mode broker / Redis: still not built — add when Crawl Worker needs them, per
-  the original plan (single-broker KRaft, explicit topic creation matching
-  `docs/specs/event-schemas.md`'s partition table, not `auto.create.topics.enable`).
+- **Kafka: built and verified** — see the "Kafka" section below for the full picture (image
+  choice, listener layout, topic list, and the real produce/consume proof). Redis is still not
+  built — add when Crawl Worker needs it.
 - **No Makefile for `devops/`, deliberately** — one existed briefly (mirroring `devops/
   observability/Makefile`'s convention) but was removed: `make` isn't installed on the actual dev
   machine this project runs on, so it was dead weight nobody could use, not a convenience. Operate
@@ -101,8 +105,17 @@ move in mind (e.g. config from env vars, not host-specific assumptions), not so 
 **Decided:**
 
 - **Kafka image**: official `apache/kafka` (KRaft mode, no Zookeeper) — not Bitnami (now
-  restricted-free-tier), not Confluent (heavier, enterprise-oriented). Use this when Kafka gets
-  built, don't re-litigate.
+  restricted-free-tier), not Confluent (heavier, enterprise-oriented). **Built now, pinned to
+  `apache/kafka:4.3.1`** (the latest stable tag on Docker Hub at build time, confirmed directly,
+  not guessed — see "Kafka" below for the full picture). Don't re-litigate the image choice; do
+  re-check the pinned version if it's ever bumped deliberately (never float it to `:latest`).
+- **Kafka does not join the `observability` network.** Metrics collection for the broker itself
+  (JMX → an exporter → Prometheus) is real future work, not done — `gateway`/`auth` export their
+  *own* telemetry via `backend/libs/otel`, but nothing does that for Kafka the broker today, and
+  standing that up (a JMX exporter sidecar, a Prometheus scrape job, a dashboard) is out of scope
+  for "the broker exists and works." Flagged here deliberately rather than left unstated, per the
+  standard this file holds itself to — revisit once a service actually depends on Kafka enough
+  that broker-level observability (consumer lag, under-replicated partitions, etc.) matters.
 
 ## OpenTelemetry — shared library + wiring (read this before touching observability)
 
@@ -352,3 +365,74 @@ looking pattern from elsewhere:
 - Logs → traces correlation depends on `OtelLogger`'s JSON body shape (see above) — if that ever
   changes, `datasources.yaml`'s `derivedFields.matcherRegex` needs to change with it, in the same
   commit.
+
+## Kafka — broker + topic creation (built and verified, not just wired up)
+
+**Image**: `apache/kafka:4.3.1`, pinned explicitly — checked against Docker Hub's actual tag list
+at build time (4.3.1 was the latest stable release, ~2 months old then; 4.x's `latest` also runs
+KRaft by default, but pinning is non-negotiable here regardless, per the Tempo `:latest` incident
+in "OpenTelemetry" above). Single node, `KAFKA_PROCESS_ROLES=broker,controller` (combined mode) —
+no Zookeeper container, matching the decided image choice above.
+
+**Listener layout** — two listeners, following the official image's own single-node example
+(`apache/kafka`'s `docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml`),
+not invented from scratch:
+- `PLAINTEXT` on `19092`, advertised as `kafka:19092` — what every other container on the
+  `askmycrawl` network (including `kafka-init`, and eventually Crawl Worker/Search Result
+  Manager/etc.) uses as its bootstrap server.
+- `PLAINTEXT_HOST` on `9092`, advertised as `localhost:9092`, published to the host — for local
+  debugging only (`kcat`, a host-side script), not used by any in-network service.
+- `CONTROLLER` on `29093` — KRaft's internal quorum listener, not client-facing.
+
+**`CLUSTER_ID` is pinned, not left to the image's default.** The image ships a built-in default
+cluster ID that applies when you run it with zero KRaft env overrides — but once
+`KAFKA_PROCESS_ROLES`/listeners/etc. are customized (as they are here) and storage is persisted on
+a volume (`./data/kafka`), an unpinned/regenerated cluster ID on a future restart would mismatch
+whatever's already formatted on disk and the broker would refuse to start. Generated once via
+`docker run --rm apache/kafka:4.3.1 kafka-storage.sh random-uuid` and hardcoded into
+`docker-compose.yml`'s `CLUSTER_ID` env var — don't regenerate it; if the volume is ever wiped
+(`docker compose down -v`), the same `CLUSTER_ID` still works fine against a freshly-formatted
+directory.
+
+**Topics are created explicitly by `kafka-init`, matching decided policy — `auto.create.topics.
+enable` stays `false`.** `kafka-init` runs `kafka-topics.sh --create --if-not-exists` once per
+topic in `docs/specs/event-schemas.md`'s table, then `--describe`s all of them (visible in
+`docker compose logs kafka-init`) and exits. `depends_on: kafka: condition: service_healthy` (not
+just `service_started`) — `kafka-topics.sh` would otherwise race the broker's own KRaft bootstrap.
+Created, verified against the spec table (all replication-factor 1 — single broker, spec doesn't
+specify one so this is the only valid choice — with retention config also set explicitly from the
+spec's table):
+
+| Topic | Partitions (spec / actual) | Retention (spec / actual) |
+|---|---|---|
+| `crawl-frontier` | 6 / 6 | 1 day / `retention.ms=86400000` |
+| `crawl-frontier-dlq` | 3 / 3 | 7 days / `retention.ms=604800000` |
+| `crawl-complete` | 3 / 3 | 1 day / `retention.ms=86400000` |
+| `answer-ready` | 3 / 3 | 1 day / `retention.ms=86400000` |
+| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` |
+
+No mismatches — every topic matches `event-schemas.md`'s table exactly.
+
+**Verified with a real produce/consume round-trip, not just "container is `Up`.`"** First attempt
+(`docker exec devops-kafka-1 kafka-console-producer.sh ... <<'EOF' ... EOF`) silently produced
+nothing — `docker exec` without `-i` doesn't attach stdin, so the producer got immediate EOF and
+exited `0` having sent zero bytes, which looked identical to success until offsets were checked
+(`kafka-get-offsets.sh` showed `0` on every partition after the "successful" run). Re-ran with
+`docker exec -i`, confirmed the offset actually advanced (partition 0: `0` → `1`), then consumed it
+back with `kafka-console-consumer.sh --from-beginning --max-messages 1` and got the exact JSON
+payload back (a `crawl-frontier`-shaped message: `job_id`/`user_id`/`url`/`depth`). This is
+worth remembering the same way the two OpenTelemetry bugs above are: **a clean exit code is not
+proof a Kafka CLI tool did what it looked like it did — check the actual state (offsets, in this
+case) when verifying, the same discipline as everywhere else in this file.**
+
+**Data persistence**: `./data/kafka` volume mounted at `/var/lib/kafka/data`
+(`KAFKA_LOG_DIRS`), matching the `./data/postgres` convention — survives `down`, wiped only by
+`docker compose down -v` (after which the pinned `CLUSTER_ID` still works against the freshly
+re-formatted directory, see above).
+
+**Not done, deliberately out of scope for this pass**: no service produces or consumes any topic
+yet (Crawl Worker, the first consumer, isn't built — see "What you're deploying" above); no
+`backend/libs/kafka-contracts` lib exists yet for typed event payloads (referenced in
+`backend-architecture.md`'s DTOs section as future work, not built); no broker-level observability
+(see the `observability` network decision above). None of these block Crawl Worker's future build —
+they're its dependencies, not this pass's.

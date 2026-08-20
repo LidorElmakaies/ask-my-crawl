@@ -1,0 +1,13 @@
+services:
+  frontend:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # Web preview only, static export served by Caddy — see frontend/Dockerfile.
+    # Android/iOS still run via `npx expo start` locally.
+    build:
+      context: ../../frontend
+    ports:
+      - "8081:80"
+    networks:
+      - askmycrawl

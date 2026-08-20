@@ -73,8 +73,12 @@ must come up first** — `devops/docker-compose.yml` references `devops/observab
 network as `external: true`, so `gateway`/`auth` fail to start without it already existing:
 ```bash
 cd devops/observability && docker compose up -d   # Grafana (:3001), Loki, Prometheus, Tempo, OTel Collector
-cd .. && docker compose up -d --build              # postgres, gateway (:8000), auth (:8001), frontend (:8081)
+cd .. && docker compose up -d --build              # postgres, gateway (:8000), auth (:8001), frontend (:8081), kafka (:9092)
 ```
+`kafka` brings up a single-broker KRaft (no Zookeeper) instance plus a one-off `kafka-init` service
+that creates every topic in `docs/specs/event-schemas.md` explicitly, then exits — see the `devops`
+agent for image/version, listener layout, and the produce/consume verification. No service
+produces/consumes yet (Crawl Worker doesn't exist), so this just stands the broker up ahead of it.
 `devops/` has no Makefile (removed deliberately — `make` isn't installed on this dev machine, see
 the `devops` agent) — the two-command sequence above, in that order, is the only way to bring it
 up. Android/iOS still run via `npx expo start` locally, not containerized.

@@ -2,109 +2,28 @@
 # Kept as a separate compose project, joined via the shared `askmycrawl` network below, so the
 # two can be brought up independently or together.
 #
-# `gateway`, `auth`, and `frontend` (web preview) exist as real code today — see
+# Split into one file per logical unit under devops/<unit>/docker-compose.yml, pulled together here
+# via the `include:` top-level key (Compose Specification, stable since v2.20) — this file itself
+# only lists what to include, plus the shared networks. `docker compose up -d --build` from `devops/`
+# still works exactly as documented in CLAUDE.md — `include:` is transparent to the CLI, nothing about
+# the bring-up sequence changes. Shared restart policy/logging driver live in `common.yml`, borrowed
+# per-service via `extends:` — not YAML anchors, which only resolve within a single YAML document and
+# can't cross the per-service files below.
+#
+# `postgres`, `gateway`, `auth`, `frontend`, and `kafka` (broker + topic init + UI) exist today — see
 # docs/specs/services.md for the remaining five backend services. Add each one here (its own
-# Dockerfile under backend/apps/<service>/, its own service block) as it gets built, along with
-# redis/kafka once something actually depends on them — see the `devops` agent
-# (.claude/agents/devops.md) for the full target shape.
+# Dockerfile under backend/apps/<service>/, its own devops/<service>/docker-compose.yml, its own
+# `include:` line below) as it gets built, along with redis once something actually depends on it —
+# see the `devops` agent (.claude/agents/devops.md) for the full target shape. No service
+# produces/consumes Kafka messages yet (Crawl Worker, the first consumer, isn't built) — Kafka just
+# stands ready ahead of that.
 
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=askmycrawl_auth
-    ports:
-      - "5432:5432"
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    restart: unless-stopped
-    networks:
-      - askmycrawl
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  gateway:
-    build:
-      context: ../backend
-      dockerfile: apps/gateway/Dockerfile
-    env_file:
-      - ../backend/.env
-    environment:
-      # Auth Service, by container service name — Gateway proxies /auth/*, /me, /admin/users* to
-      # it (see docs/specs/services.md). This is also the code default (auth-service-http.client.ts)
-      # but set explicitly here, same as auth's DATABASE_URL override below, rather than relying
-      # on the fallback matching by coincidence.
-      - AUTH_SERVICE_URL=http://auth:8001
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the networks block at the bottom of this file).
-      - OTEL_SERVICE_NAME=gateway
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
-    networks:
-      - askmycrawl
-      - observability
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  auth:
-    build:
-      context: ../backend
-      dockerfile: apps/auth/Dockerfile
-    env_file:
-      - ../backend/.env
-    environment:
-      # Overrides the .env file's localhost-based default — container-to-container calls use
-      # the service name, not localhost.
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl_auth
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the networks block at the bottom of this file).
-      - OTEL_SERVICE_NAME=auth
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    ports:
-      - "8001:8001"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - askmycrawl
-      - observability
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  frontend:
-    # Web preview only, static export served by Caddy — see frontend/Dockerfile.
-    # Android/iOS still run via `npx expo start` locally.
-    build:
-      context: ../frontend
-    ports:
-      - "8081:80"
-    restart: unless-stopped
-    networks:
-      - askmycrawl
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+include:
+  - path: postgres/docker-compose.yml
+  - path: gateway/docker-compose.yml
+  - path: auth/docker-compose.yml
+  - path: frontend/docker-compose.yml
+  - path: kafka/docker-compose.yml
 
 networks:
   askmycrawl:            # internal service-to-service (Postgres, and the services themselves)

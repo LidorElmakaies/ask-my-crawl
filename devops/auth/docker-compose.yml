@@ -1,0 +1,26 @@
+services:
+  auth:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    build:
+      context: ../../backend
+      dockerfile: apps/auth/Dockerfile
+    env_file:
+      - ../../backend/.env
+    environment:
+      # Overrides the .env file's localhost-based default — container-to-container calls use
+      # the service name, not localhost.
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl_auth
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the root docker-compose.yml's networks: block).
+      - OTEL_SERVICE_NAME=auth
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    ports:
+      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - askmycrawl
+      - observability

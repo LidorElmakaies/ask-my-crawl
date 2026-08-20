@@ -1,0 +1,16 @@
+# Shared service defaults — restart policy + logging driver, borrowed via `extends:` (not YAML
+# anchors: those only resolve within a single YAML document, which breaks once config is split
+# across the per-service files under devops/<unit>/). `_defaults` is never listed in the root
+# docker-compose.yml's `include:`, so it never runs as a container of its own — every real service
+# pulls from it via `extends:` and layers its own image/build/ports/environment/networks on top.
+#
+# `networks:` is deliberately NOT here — gateway/auth need `[askmycrawl, observability]`, everything
+# else needs just `[askmycrawl]`, so that stays per-service rather than forcing a false uniform value.
+services:
+  _defaults:
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

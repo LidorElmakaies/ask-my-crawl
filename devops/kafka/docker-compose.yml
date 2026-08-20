@@ -1,0 +1,108 @@
+services:
+  kafka:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # Official apache/kafka image, KRaft mode (no Zookeeper) — decided in .claude/agents/devops.md,
+    # don't switch to Bitnami/Confluent. Pinned to 4.3.1 (latest stable at the time this was built,
+    # confirmed via Docker Hub, not guessed) — never `:latest`, see the observability stack's Tempo
+    # incident in devops.md for why an image silently drifting onto an incompatible config schema is
+    # a real, previously-hit failure mode here, not hygiene.
+    #
+    # Single node running combined broker+controller roles. Two listeners: PLAINTEXT (19092) for
+    # other containers on the `askmycrawl` network — services address it as `kafka:19092` — and
+    # PLAINTEXT_HOST (9092) published to the host for local debugging (kcat, etc.), matching the
+    # official image's own single-node example. CLUSTER_ID is pinned explicitly (generated once via
+    # `kafka-storage.sh random-uuid`, not left to the image's built-in default) because storage is
+    # persisted on a volume — an unpinned/regenerated cluster ID on a restart would mismatch
+    # already-formatted storage and fail to start.
+    image: apache/kafka:4.3.1
+    hostname: kafka
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      - KAFKA_LISTENERS=CONTROLLER://:29093,PLAINTEXT://:19092,PLAINTEXT_HOST://:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:9092
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:29093
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - CLUSTER_ID=Ce7_-Gn5RayKP8NT08XXBw
+      # Single-broker dev setup — every replication factor must be 1, the defaults (3) can't be
+      # satisfied with one broker and the broker would reject topic creation otherwise.
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      # Decided in devops.md: topics are created explicitly by `kafka-init` below, matching
+      # event-schemas.md's partition table exactly. Auto-creation would silently paper over a
+      # missing/misconfigured topic (wrong partition count, picked up implicitly on first publish)
+      # instead of failing loudly, so it stays off.
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+    volumes:
+      - ../data/kafka:/var/lib/kafka/data
+    networks:
+      - askmycrawl
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  kafka-init:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # One-off: creates topics explicitly (kafka-topics.sh --create), matching partition counts from
+    # docs/specs/event-schemas.md, then exits. Runs after `kafka` is healthy, not just started —
+    # kafka-topics.sh would otherwise race the broker's own startup. `restart: "no"` overrides the
+    # shared default below — this is a one-off job, not a long-running service.
+    #
+    # Deliberately empty right now — no topic-creation lines below. Decided (2026-08-20): topics get
+    # added here one at a time, alongside whichever piece of the pipeline actually produces/consumes
+    # each one, not all five up front — e.g. add `crawl-frontier` when Crawl Result Manager/Crawl
+    # Worker's produce/consume path is being built and verified, not before. Until the first topic is
+    # added, this just proves connectivity (`--list` against an empty cluster) — kept in the compose
+    # file rather than removed so there's nowhere new to wire up when the first topic lands, just a
+    # line to add here.
+    image: apache/kafka:4.3.1
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - askmycrawl
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - >-
+        set -e &&
+        echo '--- no topics defined yet; add kafka-topics.sh --create lines here as each is needed (see docs/specs/event-schemas.md) ---' &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --list
+
+  kafka-ui:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # Web UI for browsing topics/partitions/messages/consumer groups — debugging convenience only,
+    # not part of the app stack (no service reads/writes through it). Pinned to v1.5.0, the latest
+    # stable release tag at the time this was added, not `:latest` (same discipline as every other
+    # image in this file). Points at the in-network `PLAINTEXT` listener, same as every other
+    # container on `askmycrawl` — see the `kafka` service above for why that's the right one to use
+    # from inside the network vs. `PLAINTEXT_HOST`.
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=askmycrawl
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:19092
+    ports:
+      - "8080:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - askmycrawl

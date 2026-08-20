@@ -1,0 +1,25 @@
+services:
+  gateway:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    build:
+      context: ../../backend
+      dockerfile: apps/gateway/Dockerfile
+    env_file:
+      - ../../backend/.env
+    environment:
+      # Auth Service, by container service name — Gateway proxies /auth/*, /me, /admin/users* to
+      # it (see docs/specs/services.md). This is also the code default (auth-service-http.client.ts)
+      # but set explicitly here, same as auth's DATABASE_URL override below, rather than relying
+      # on the fallback matching by coincidence.
+      - AUTH_SERVICE_URL=http://auth:8001
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the root docker-compose.yml's networks: block).
+      - OTEL_SERVICE_NAME=gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    ports:
+      - "8000:8000"
+    networks:
+      - askmycrawl
+      - observability
