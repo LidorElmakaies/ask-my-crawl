@@ -4,5 +4,8 @@
 # Local working notes — personal TODO tracking, never shared via git. See TODO.md's own header.
 TODO.md
 
+# Personal Claude Code settings — machine-specific paths/permissions, not meant to be shared.
+.claude/settings.local.json
+
 # OS
 .DS_Store

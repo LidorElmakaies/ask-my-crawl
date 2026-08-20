@@ -1,3 +1,6 @@
 # Memory Index
 
+- [askmycrawl project](project_askmycrawl.md) — ongoing crawl+RAG+notify project: stack, architecture, where its docs live
+- [Commits need explicit approval](feedback_commits_need_explicit_approval.md) — never commit proactively; ask first, even for docs-only work
+- [Gateway-only service access](feedback_gateway_only_service_access.md) — the frontend only ever reaches the Gateway, never a backend service directly; internal service-to-service calls are unaffected
 - [Agent Teams Reference](reference_agent_teams.md) — How to enable/use Claude Code experimental agent teams: capabilities, architecture, best practices, and limitations
