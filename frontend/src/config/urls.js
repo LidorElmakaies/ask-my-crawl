@@ -17,4 +17,14 @@ export const URLS = {
   auth: {
     origin: BASE_URL,
   },
+  // Gated admin-only surface (docs/planning/02-admin-dashboard-plan.md) — all proxied through the
+  // Gateway, same origin as everything else, never a direct service origin. grafana/kafkaUi are
+  // WebView destinations (trailing slash matters — Grafana/Kafka UI are configured to serve from
+  // exactly this sub-path); token-appending for them happens where they're opened, not baked in
+  // here, since the token itself doesn't belong in a static config file.
+  admin: {
+    users: `${BASE_URL}/admin/users`,
+    grafana: `${BASE_URL}/admin/grafana/`,
+    kafkaUi: `${BASE_URL}/admin/kafka-ui/`,
+  },
 };

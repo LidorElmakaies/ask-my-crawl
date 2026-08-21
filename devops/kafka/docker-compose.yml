@@ -99,8 +99,23 @@ services:
     environment:
       - KAFKA_CLUSTERS_0_NAME=askmycrawl
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:19092
-    ports:
-      - "8080:8080"
+      # Serving from the Gateway's /admin/kafka-ui sub-path (docs/planning/
+      # 02-admin-dashboard-plan.md) — same context-path config kafbat's own example compose file
+      # uses (documentation/compose/auth-context.yaml). UNCONFIRMED RISK: a historical GitHub
+      # issue on the predecessor project (provectus/kafka-ui#2346) reported the frontend's own
+      # client-side routing *ignoring* this exact setting after a refactor. Unknown whether kafbat
+      # v1.5.0 still has this bug — must be smoke-tested live once the stack is up (blank page /
+      # broken routing under /admin/kafka-ui is the symptom). Fallback if it reproduces: proxy-side
+      # path handling in tool-proxy.factory.ts instead of relying on kafka-ui's own context-path
+      # awareness — don't silently reach for that without confirming the smoke test actually
+      # failed first.
+      - SERVER_SERVLET_CONTEXT_PATH=/admin/kafka-ui
+    # No host port publish (was "8080:8080") — see docs/planning/02-admin-dashboard-plan.md,
+    # Decision 4 (same reasoning applied to Grafana's port in devops/observability/
+    # docker-compose.yml): reachable only through the Gateway's admin-gated reverse proxy now — a
+    # direct host port would let anyone bypass that gate, making "admin-only" an in-app
+    # convenience instead of a real boundary. Accepted tradeoff: no more direct localhost:8080
+    # access for local debugging.
     depends_on:
       kafka:
         condition: service_healthy

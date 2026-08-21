@@ -13,3 +13,7 @@ export const CONNECTION_STORE = Symbol('IConnectionStore');
 // auth-proxy/
 export const AUTH_PROXY_SERVICE = Symbol('IAuthProxyService');
 export const AUTH_SERVICE_CLIENT = Symbol('IAuthServiceClient');
+
+// tool-proxy/ — no tokens of its own. AdminAuthGateMiddleware depends directly on
+// AUTH_TOKEN_SERVICE (@app/auth-kernel); there's no new business logic here to put behind an
+// interface (see tool-proxy.module.ts's header comment).
