@@ -72,9 +72,14 @@ npx expo start --web
 must come up first** — `devops/docker-compose.yml` references `devops/observability`'s Docker
 network as `external: true`, so `gateway`/`auth` fail to start without it already existing:
 ```bash
-cd devops/observability && docker compose up -d   # Grafana (:3001), Loki, Prometheus, Tempo, OTel Collector
-cd .. && docker compose up -d --build              # postgres, gateway (:8000), auth (:8001), frontend (:8081), kafka (:9092)
+cd devops/observability && docker compose --env-file ../.env up -d   # Grafana (via Gateway's /admin/grafana, no direct port), Loki, Prometheus, Tempo, OTel Collector
+cd .. && docker compose up -d --build                                # postgres, gateway (:8000), auth (:8001), frontend (:8081), kafka (:9092)
 ```
+`devops/.env` (copy from `devops/.env.example`) holds `PUBLIC_ORIGIN` — the single source of truth
+for the deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and the frontend build.
+`devops/observability` is a separate Compose project from `devops/` (different directory), so its
+command needs the explicit `--env-file ../.env` flag to share that same file; `devops/`'s own
+command picks it up automatically since Compose reads `.env` from the directory it's invoked from.
 `kafka` brings up a single-broker KRaft (no Zookeeper) instance plus a one-off `kafka-init` service
 that creates every topic in `docs/specs/event-schemas.md` explicitly, then exits — see the `devops`
 agent for image/version, listener layout, and the produce/consume verification. No service

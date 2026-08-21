@@ -1,4 +1,10 @@
-const BASE_URL = 'http://localhost:8000';
+// Single source of truth for the deployment's public origin lives in devops/.env.example
+// (PUBLIC_ORIGIN) — the Dockerized build (frontend/Dockerfile) bakes it in as
+// EXPO_PUBLIC_GATEWAY_ORIGIN (Expo inlines any EXPO_PUBLIC_* var into the client bundle at build
+// time). Falls back to the same localhost default for the bare `npx expo start` dev-server loop,
+// which isn't part of that build-arg plumbing — set the env var yourself if you ever need a local
+// dev server pointed at a non-local Gateway.
+const BASE_URL = process.env.EXPO_PUBLIC_GATEWAY_ORIGIN ?? 'http://localhost:8000';
 
 export const URLS = {
   base: BASE_URL,

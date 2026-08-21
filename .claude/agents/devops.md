@@ -60,12 +60,21 @@ Worker exists.
 collector must actually be answering, or app services silently lose telemetry with no error
 anywhere (see "OpenTelemetry" below). Always bring `devops/observability` up first:
 ```bash
-cd devops/observability && docker compose up -d
+cd devops/observability && docker compose --env-file ../.env up -d
 cd .. && docker compose up -d --build
 ```
 There's no tooling enforcing this ordering (see "No Makefile" above) — it's a manual discipline,
 document it wherever `devops/`'s startup is documented (root `CLAUDE.md`, this file), don't let it
 drift back to "just `cd devops && docker compose up`" in any doc.
+
+The `--env-file ../.env` flag on the observability command is load-bearing, not optional styling —
+`devops/.env` (`PUBLIC_ORIGIN`, see `devops/.env.example`) is the single source of truth for the
+deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and the frontend build's
+`EXPO_PUBLIC_GATEWAY_ORIGIN`. `devops/observability` is a separate Compose project (own directory,
+own invocation) — Compose's automatic `.env` discovery only checks the directory it's run from, so
+without this flag observability silently falls back to `GF_SERVER_ROOT_URL`'s hardcoded default
+instead of picking up a deliberately-changed value. `devops/`'s own command doesn't need the flag —
+it already runs from the directory `devops/.env` lives in.
 
 ## Non-negotiables
 

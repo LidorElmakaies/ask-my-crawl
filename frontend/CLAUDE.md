@@ -154,5 +154,8 @@ npx expo start --web
 
 Backend must be running for the app to be useful — the frontend only ever talks to the Gateway at
 `localhost:8000` (scraper tab, WS, and now register/login/`/me` too, proxied to Auth Service).
-Easiest way to bring the whole backend up: `cd devops/observability && docker compose up -d`, then
+`localhost:8000` is a default, not hardcoded in the Dockerized build — `src/config/urls.js` reads
+`EXPO_PUBLIC_GATEWAY_ORIGIN`, sourced from `devops/.env`'s `PUBLIC_ORIGIN` (see `devops/.env.example`),
+the single source of truth for the deployment's public origin. Easiest way to bring the whole
+backend up: `cd devops/observability && docker compose --env-file ../.env up -d`, then
 `cd .. && docker compose up -d --build` (observability must come up first — see root `CLAUDE.md`).
