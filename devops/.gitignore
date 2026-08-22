@@ -1,2 +1,5 @@
 # Runtime data volumes for the app stack (docker-compose.yml) — not config, don't commit.
 data/
+
+# Real values (PUBLIC_ORIGIN, ...) — see .env.example for the committed template.
+.env

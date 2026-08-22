@@ -92,17 +92,32 @@ services:
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./data/grafana:/var/lib/grafana
-    ports:
-      # Host port 3001, not 3000 — an unrelated process on the dev machine already holds host
-      # :3000 (confirmed via `Get-Process` before remapping, not touched/killed). Container's own
-      # port stays 3000 internally; only the host-side mapping changed.
-      - "3001:3000"   # External dashboard access — http://localhost:3001
+    # No host port publish (was "3001:3000") — see docs/planning/02-admin-dashboard-plan.md,
+    # Decision 4. Grafana is now reachable only through the Gateway's admin-gated reverse proxy
+    # (backend/apps/gateway/src/tool-proxy/), at /admin/grafana on the Gateway's own origin
+    # (http://localhost:8000) — a direct host port would let anyone bypass that gate entirely,
+    # making "admin-only" an in-app convenience instead of a real boundary. Accepted tradeoff:
+    # no more direct localhost:3001 access for local debugging.
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      # Serving from the Gateway's /admin/grafana sub-path (see above) — Grafana needs to know its
+      # own mount path or its rendered asset/API links break. With SERVE_FROM_SUB_PATH=true,
+      # Grafana expects to keep receiving requests with the /admin/grafana prefix still attached —
+      # the Gateway's proxy middleware deliberately does not strip it (see tool-proxy.factory.ts).
+      # Deliberately NOT adding GF_SECURITY_ALLOW_EMBEDDING — the Admin Dashboard renders Grafana
+      # full-screen via a WebView, never in an iframe, so embedding permission is never needed;
+      # don't add it "just in case," it only widens the attack surface for no benefit here.
+      #
+      # PUBLIC_ORIGIN is the single source of truth for the whole deployment's public origin (see
+      # ../.env.example) — this is a *separate* Compose project from devops/, so it needs its own
+      # explicit `--env-file ../.env` flag to pick up the same file (see CLAUDE.md's startup
+      # sequence); the :- default keeps this working even if that flag is ever forgotten.
+      - GF_SERVER_ROOT_URL=${PUBLIC_ORIGIN:-http://localhost:8000}/admin/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     depends_on:
       - loki
       - prometheus

@@ -9,6 +9,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm install
 COPY . .
+# Single source of truth for the deployment's public origin — see devops/.env.example. Passed in
+# as a build arg (devops/frontend/docker-compose.yml), re-exposed with the EXPO_PUBLIC_ prefix
+# Expo requires to inline a var into the client bundle at build time — src/config/urls.js reads
+# it. Default here matches urls.js's own fallback, for a plain `docker build` with no --build-arg.
+ARG PUBLIC_ORIGIN=http://localhost:8000
+ENV EXPO_PUBLIC_GATEWAY_ORIGIN=$PUBLIC_ORIGIN
 RUN npm run build:web
 
 FROM caddy:2-alpine AS runner

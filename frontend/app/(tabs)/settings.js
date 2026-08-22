@@ -1,10 +1,13 @@
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import ConnectionStatus from '../../src/components/ConnectionStatus';
 import GlowCard from '../../src/components/GlowCard';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
+import { clearAuth } from '../../src/store/slices/authSlice';
 import { setThemeMode } from '../../src/store/slices/themeSlice';
 
 export default function SettingsScreen() {
@@ -12,8 +15,13 @@ export default function SettingsScreen() {
   const { mode } = useSelector((state) => state.theme);
   const { status } = useSelector((state) => state.ws);
   const { isDark, colors, colorMode } = useAppTheme();
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   const toggle = () => dispatch(setThemeMode(isDark ? 'light' : 'dark'));
+  // Clearing authSlice is the whole action — AuthGate (app/_layout.js) reacts to accessToken
+  // going null and redirects to /login itself, and RealtimeConnectionManager disconnects the
+  // socket the same way, so no manual navigation/disconnect needed here.
+  const logout = () => dispatch(clearAuth());
 
   return (
     <SpaceBackground>
@@ -86,6 +94,37 @@ export default function SettingsScreen() {
               app/_layout.js connects automatically whenever a token is present. */}
           <ConnectionStatus status={status} />
         </GlowCard>
+
+        <Text style={[styles.section, styles.connectionSection, { color: colors.textMuted }]}>
+          Account
+        </Text>
+        <GlowCard>
+          {confirmingLogout ? (
+            <View style={styles.confirmRow}>
+              <Text style={[styles.confirmText, { color: colors.text }]}>Log out of your account?</Text>
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  onPress={logout}
+                  style={[styles.confirmButton, { backgroundColor: colors.error }]}
+                >
+                  <Text style={styles.confirmButtonText}>Log Out</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setConfirmingLogout(false)} style={styles.cancelButton}>
+                  <Text style={[styles.cancelText, { color: colors.textMuted }]}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity
+              onPress={() => setConfirmingLogout(true)}
+              style={styles.logoutRow}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="log-out-outline" size={20} color={colors.error} />
+              <Text style={[styles.logoutText, { color: colors.error }]}>Log Out</Text>
+            </TouchableOpacity>
+          )}
+        </GlowCard>
       </View>
     </SpaceBackground>
   );
@@ -153,5 +192,44 @@ const styles = StyleSheet.create({
   },
   connectionSection: {
     marginTop: 32,
+  },
+  logoutRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  logoutText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  confirmRow: {
+    gap: 12,
+  },
+  confirmText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  confirmButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  confirmButtonText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  cancelButton: {
+    paddingHorizontal: 8,
+  },
+  cancelText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

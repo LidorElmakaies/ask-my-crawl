@@ -1,20 +1,30 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSelector } from 'react-redux';
 import { useThemeAnim } from '../../src/context/ThemeAnimContext';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 
 import { dark as darkColors, light as lightColors } from '../../src/theme/colors';
 
+// 'admin' must stay LAST — CustomTabBar below matches array position to state.index (React
+// Navigation's actual route index, which always includes every registered <Tabs.Screen> in
+// declaration order regardless of the admin-only filtering below). Non-admins never reach the
+// admin route at all (app/(tabs)/admin/_layout.js redirects away), so state.index for them can
+// only ever land on 0/1/2 — which still lines up with the filtered (3-item) list below. Reordering
+// 'admin' out of last place would break that alignment.
 const TABS = [
   { name: 'index',    label: 'Home',     icon: 'home',        iconActive: 'home' },
   { name: 'scraper',  label: 'Scraper',  icon: 'search-outline', iconActive: 'search' },
   { name: 'settings', label: 'Settings', icon: 'settings-outline', iconActive: 'settings' },
+  { name: 'admin',    label: 'Admin',    icon: 'shield-outline', iconActive: 'shield', adminOnly: true },
 ];
 
 function CustomTabBar({ navigation, state }) {
   const { colors } = useAppTheme();
   const progress = useThemeAnim();
+  const role = useSelector((reduxState) => reduxState.auth.user?.role);
+  const visibleTabs = TABS.filter((tab) => !tab.adminOnly || role === 'admin');
 
   const animatedBg = progress.interpolate({
     inputRange: [0, 1],
@@ -33,7 +43,7 @@ function CustomTabBar({ navigation, state }) {
         { backgroundColor: animatedBg, borderTopColor: animatedBorder },
       ]}
     >
-      {TABS.map((tab, index) => {
+      {visibleTabs.map((tab, index) => {
         const isActive = state.index === index;
 
         return (
@@ -81,6 +91,8 @@ function CustomTabBar({ navigation, state }) {
 }
 
 export default function TabsLayout() {
+  const role = useSelector((reduxState) => reduxState.auth.user?.role);
+
   return (
     <Tabs
       screenOptions={{ headerShown: false }}
@@ -89,6 +101,12 @@ export default function TabsLayout() {
       <Tabs.Screen name="index" />
       <Tabs.Screen name="scraper" />
       <Tabs.Screen name="settings" />
+      {/* href: null hides the tab from Expo Router's own default tab bar / <Link> resolution for
+          non-admins (https://docs.expo.dev/router/advanced/tabs/) — belt-and-suspenders alongside
+          CustomTabBar's own visibleTabs filtering above, which is what actually controls this
+          fully custom tab bar's rendering. The route itself stays reachable either way; the real
+          boundary is app/(tabs)/admin/_layout.js's redirect plus the backend's own role guard. */}
+      <Tabs.Screen name="admin" options={{ href: role === 'admin' ? undefined : null }} />
     </Tabs>
   );
 }

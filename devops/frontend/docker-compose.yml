@@ -7,6 +7,12 @@ services:
     # Android/iOS still run via `npx expo start` locally.
     build:
       context: ../../frontend
+      args:
+        # Single source of truth for the deployment's public origin — see ../.env.example.
+        # Expo bakes EXPO_PUBLIC_* vars into the client bundle at build time (frontend/Dockerfile
+        # re-exposes this ARG as EXPO_PUBLIC_GATEWAY_ORIGIN before `npm run build:web` runs), so
+        # this has to be a build arg, not a runtime container env var.
+        - PUBLIC_ORIGIN=${PUBLIC_ORIGIN:-http://localhost:8000}
     ports:
       - "8081:80"
     networks:
