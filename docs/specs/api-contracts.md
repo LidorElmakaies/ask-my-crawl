@@ -41,12 +41,15 @@ None of these require an access token (they're how you get one).
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| POST | `/jobs` | `{ url, query }` | `202` → `{ job }` with `status: "pending"`. Gateway creates the job row (via internal call to Crawl Result Manager) and publishes the seed `crawl-frontier` message before responding. |
-| GET | `/jobs` | — | User: own jobs only. Admin: all jobs, with optional `?user_id=` filter. |
-| GET | `/jobs/:id` | — | User: 403 if not their own job. Admin: any job. Includes nested `result` once `status: "completed"`. |
+| POST | `/jobs` | `{ url, query }` | `202` → `{ status: "accepted" }` — **no `job_id`**. Gateway does not call Job Manager Service synchronously here — it publishes a `job-requests` Kafka message and returns immediately, before any job row exists to hand back an id for. The frontend learns the real `job_id` asynchronously via a `job.created` WebSocket push (see the WebSocket section below) once Job Manager Service has actually created the row. (This response's `status: "accepted"` is just an ack literal — unrelated to the `jobs` row, which has no `status` column at all, see below.) |
+| GET | `/jobs` | — | User: own jobs only. Admin: all jobs, with optional `?user_id=` filter. Unaffected by the above — still a synchronous internal call to Job Manager Service, this is a read, not the write path being decoupled. |
+| GET | `/jobs/:id` | — | User: 403 if not their own job. Admin: any job. `result` is `null` until the answer is ready — that's the only "is it done" signal now, see below. Same as above — still synchronous. |
 
-`job` shape: `{ id, user_id, seed_url, query, depth_limit, status, error_message, created_at, completed_at, result? }`
-`result` shape: `{ answer_text, source_page_ids, created_at }`
+`job` shape: `{ id, user_id, url, query, result }` — `result` is the answer text, `null` until
+Query/Answer Service finishes. No `status`/timestamps/`error_message` fields, and `result` is a
+plain string-or-null field directly on `job`, not a nested object. Source attribution isn't
+persisted anywhere — see `data-model.md`'s `jobs` table for the full list of what this table does
+and doesn't track.
 
 ## Admin — user management (requires access token with `role: admin`)
 
@@ -75,12 +78,18 @@ Server → client: every event arrives on a single `message` event, payload shap
 carries, regardless of transport):
 
 ```jsonc
-// on job completion, matches the result-saved Kafka event
-{ "type": "job.completed", "job_id": "uuid", "answer_text": "string", "completed_at": "ISO8601" }
+// once Job Manager Service has actually created the job row — matches the job-created Kafka
+// event. This is the ONLY way the frontend learns job_id: POST /jobs (above) responds before the
+// row exists and never returns one. If the client isn't connected when this fires, it only finds
+// out about the job via a later GET /jobs listing it — same gap as job.completed below.
+{ "type": "job.created", "job_id": "uuid", "user_id": "uuid", "url": "string", "query": "string" }
 
-// optional, if we want live progress rather than just a final push
-{ "type": "job.status", "job_id": "uuid", "status": "crawling" | "answering" }
+// on job completion, matches the result-saved Kafka event
+{ "type": "job.completed", "job_id": "uuid", "result": "string" }
 ```
+
+No `job.status` progress event — the `jobs` table has no `status` column, so there's no in-between
+state to report. A client only ever learns "created" (job.created) and "done" (job.completed).
 
 No client → server messages are required for v1 — the socket is push-only. Frontend implementation:
 `frontend/src/services/socketService.js` (the only file allowed to import `socket.io-client`),

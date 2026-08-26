@@ -1,84 +1,176 @@
 # Event Schemas (Kafka)
 
 All services connect via `@nestjs/microservices`' Kafka transporter (kafkajs underneath). Partition
-key is noted per topic — job coordination correctness comes from Redis (§ data-model.md), not from
-Kafka ordering, so partition keys are chosen for even load distribution, not ordering guarantees.
+key is noted per topic — job coordination correctness is a concern for whatever consumes
+`crawl-frontier` to decide, not something Kafka ordering provides, so partition keys below are
+chosen for even load distribution, not ordering guarantees.
+
+## `job-requests`
+
+**Not implemented.** It should fire from Gateway on `POST /jobs`, before any job row exists —
+Gateway does not call Job Manager Service synchronously to create the job row. It publishes this
+message and responds `202` immediately, with no `job_id` yet (Gateway doesn't have one to give).
+See `job-created` below for how the frontend eventually learns the real `job_id`.
+
+- **Producers**: Gateway
+- **Consumers**: Job Manager Service, consumer group `job-manager`
+- **Partition key**: `user_id`
+- **Value**:
+  ```jsonc
+  {
+    "user_id": "uuid",
+    "url": "https://example.com",   // Gateway does not normalize this — whatever consumes crawl-frontier does, on receipt
+    "query": "the user's question"
+  }
+  ```
+  These exact 3 fields become the `jobs` row's `user_id`/`url`/`query` columns verbatim —
+  Job Manager Service adds only `id` (generated) and `result` (`NULL` at first). See
+  `data-model.md`'s `jobs` table.
 
 ## `crawl-frontier`
 
-The BFS work queue — both the initial seed URL and every subsequently-discovered URL go on this one
-topic, per the original design ("we put the urls found in the kafka same topic but the depth is one
-lower").
+**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. The BFS work
+queue for the Scraper service — both the initial seed URL and every subsequently-discovered URL on
+one topic (the seed producer and the Scraper both publish onto it).
 
-- **Producers**: Crawl Result Manager (seed message, on job creation), Crawl Worker (child URLs)
-- **Consumers**: Crawl Worker pool, consumer group `crawl-workers`
-- **Partition key**: `url_hash` (spreads load evenly; a worker doesn't need messages for the same
-  job co-located)
+- **Producers**: Job Manager Service (seed message, on consuming `job-requests`); the Scraper's
+  Scraper Worker also re-produces child-URL messages back onto it
+- **Consumers**: the Scraper's Frontier Consumer, consumer group `scraper` (owns per-job dedup —
+  see the planning doc; this is the single authoritative gate, so redelivery of the same message is
+  harmless)
+- **Partition key**: `url_hash` (spreads load evenly; no consumer needs messages for the same job
+  co-located)
 - **Value**:
   ```jsonc
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "url": "https://example.com/page",   // not yet normalized — worker normalizes on receipt
-    "depth": 3                            // always >= 1; depth-0 URLs are never produced (see data-model.md)
+    "url": "https://example.com/page",   // not yet normalized — the consumer normalizes on receipt
+    "depth": 3,                           // remaining-hops budget, NOT an absolute depth — starts at
+                                           // MAX_CRAWL_DEPTH (currently 3, see @app/kafka-contracts)
+                                           // on the seed message and counts DOWN by 1 per hop; the
+                                           // Scraper stops re-publishing once depth reaches 0
+                                           // (see data-model.md)
+    "query": "the user's original question"
   }
   ```
+  `crawl-complete` (below) needs the job's query. Rather than have whatever consumes
+  `crawl-frontier` call Job Manager Service synchronously just to fetch it, the seed producer
+  (Job Manager Service) sets `query` once from the job row, and every re-produced child message
+  is expected to copy it through unchanged — a plain propagate-only field.
 
-## `crawl-frontier-dlq`
+## `job-created`
 
-Failed crawl-frontier messages after retry exhaustion (retry policy TBD — e.g. 3 attempts with
-backoff at the consumer level before landing here). A message here must still trigger the Redis
-`DECR` for its job's pending counter — a dead-lettered URL still counts as "finished," or the job
-hangs forever.
+**Not implemented.** It should fire from Job Manager Service once it has actually created the
+`jobs` row and published the seed `crawl-frontier` message — this is how the frontend learns the
+real `job_id` that `POST /jobs` couldn't return synchronously, since Gateway never has one (see
+`job-requests` above).
 
-- **Producers**: Crawl Worker (on unrecoverable fetch error)
-- **Consumers**: none yet wired up — placeholder for future alerting/manual replay tooling
-- **Value**: same as `crawl-frontier`, plus `{ "error": "string", "failed_at": "ISO8601" }`
-
-## `crawl-complete`
-
-Fired once by whichever Crawl Worker's `DECR` on `job:{job_id}:pending` hits zero — i.e. the last
-outstanding URL for a job just finished.
-
-- **Producers**: Crawl Worker
-- **Consumers**: Query/Answer Service, consumer group `query-answer`
+- **Producers**: Job Manager Service
+- **Consumers**: Gateway, consumer group `gateway`
 - **Partition key**: `job_id`
 - **Value**:
   ```jsonc
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "query": "the user's original question"
+    "url": "https://example.com",
+    "query": "the user's question"
+  }
+  ```
+  Matches the `jobs` row Job Manager Service creates (see `data-model.md`) minus `result` (still
+  `NULL` at this point) — no `status` field, that column doesn't exist.
+- Gateway behavior on receipt: same relay pattern as `result-saved` below — look up an active
+  WebSocket connection for `user_id`, push a `job.created` event (see `api-contracts.md`'s
+  WebSocket section) with this payload if connected. If the user isn't currently connected, no
+  action needed — a subsequent `GET /jobs` will list the job once it exists, they just won't get
+  the live "your job now has an id" push. (Same known gap as `result-saved`'s Notification Service
+  fallback — not solved here, just restated: a disconnected client has no live channel, only poll.)
+
+## `page-scraped`
+
+**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. It should fire
+from the Scraper Worker once a page's raw HTML is saved to SeaweedFS, and bridge into the Indexer's
+`index-page` BullMQ queue via its Index Intake Consumer (Kafka→BullMQ bridge, mirroring
+`crawl-frontier`→`process-url`).
+
+- **Producers**: the Scraper's Scraper Worker(s)
+- **Consumers**: the Indexer's Index Intake Consumer, consumer group `indexer`
+- **Partition key**: not decided (deferred until this topic is actually wired up)
+- **Value**:
+  ```jsonc
+  {
+    "job_id": "uuid",
+    "user_id": "uuid",
+    "url": "https://example.com/page",       // as discovered, not normalized
+    "normalizedUrl": "string",                // normalized form — SeaweedFS blob key is sha256(this)
+    "blobKey": "string",                      // sha256(normalizedUrl) — SeaweedFS object key
+    "depth": 2,
+    "scrapedAt": "ISO8601",
+    "query": "the user's original question"   // propagate-only, same as on crawl-frontier
   }
   ```
 
+## `crawl-complete`
+
+**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. It should fire
+once a job's two Redis pending-work counters (`pending_scrape`, `pending_index`) both reach zero —
+a `SET NX` race guard ensures exactly one producer per job. The payload is a full result summary,
+so Query/Answer Service can act without a callback to fetch counts/URL lists separately.
+
+- **Producers**: the Scraper's Scraper Worker **or** the Indexer's Indexing Worker — whichever
+  component's decrement observes both counters at zero and wins the race guard. Not always the same
+  service for every job.
+- **Consumers**: Query/Answer Service, consumer group `query-answer` (not implemented — nothing
+  consumes this topic today, but it must still exist since `auto.create.topics.enable=false`)
+- **Partition key**: `job_id`
+- **Value**:
+  ```jsonc
+  {
+    "job_id": "uuid",
+    "user_id": "uuid",
+    "query": "the user's original question",
+    "url": "https://example.com",             // base_url — the original seed URL
+    "succeeded_count": 12,
+    "failed_count": 1,
+    "succeeded_urls": ["https://example.com/a", "..."],
+    "failed_urls": ["https://example.com/broken-page"]
+  }
+  ```
+  Note for later, not a concern yet: at depth-3/single-domain scope the URL lists stay small; if
+  that scope ever changes, they could move to a small object in SeaweedFS with just a pointer +
+  the counts left in the event.
+
 ## `answer-ready`
 
-Fired once the Query/Answer Service has run retrieval + the LLM call. Two independent consumer
-groups read this topic in parallel — Kafka pub/sub, not point-to-point — matching the original
-description of the answer going to both notification and persistence at the same stage.
+**Not implemented.** It should fire once Query/Answer Service has run retrieval + the LLM call. Two
+independent consumer groups read this topic in parallel — Kafka pub/sub, not point-to-point — since
+the answer goes to both notification and persistence at the same stage.
 
 - **Producers**: Query/Answer Service
 - **Consumers**:
   - Notification Service, consumer group `notification-service`
-  - Crawl Result Manager, consumer group `crawl-result-manager`
+  - Job Manager Service, consumer group `job-manager`
 - **Partition key**: `job_id`
 - **Value**:
   ```jsonc
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "answer_text": "string",
-    "source_page_ids": ["uuid", "..."]
+    "answer_text": "string"
   }
   ```
+  No `source_urls` field: Query/Answer Service runs retrieval against the Indexer internally to
+  build the LLM prompt, but nothing carries that source list any further than this call — it isn't
+  persisted or forwarded anywhere.
 
 ## `result-saved`
 
-Fired by the Crawl Result Manager once it has persisted the `results` row, so the Gateway can push
-the update to the user's open WebSocket connection.
+**Not implemented.** It should fire from Job Manager Service once it has written the answer into
+the `jobs.result` column, so the Gateway can push the update to the user's open WebSocket
+connection.
 
-- **Producers**: Crawl Result Manager
+- **Producers**: Job Manager Service
 - **Consumers**: Gateway, consumer group `gateway`
 - **Partition key**: `user_id`
 - **Value**:
@@ -86,10 +178,10 @@ the update to the user's open WebSocket connection.
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "answer_text": "string",
-    "completed_at": "ISO8601"
+    "result": "string"
   }
   ```
+  No `completed_at` — the `jobs` table carries no timestamps, see `data-model.md`.
 - Gateway behavior on receipt: look up an active WebSocket connection for `user_id` in its
   connection registry; if connected, push a `job.completed` event with this payload. If the user
   isn't currently connected, no action needed here — they still get email/SMS/Telegram, and will see
@@ -99,8 +191,21 @@ the update to the user's open WebSocket connection.
 
 | Topic | Partitions | Retention |
 |---|---|---|
+| `job-requests` | 3 | 1 day |
 | `crawl-frontier` | 6 | 1 day |
-| `crawl-frontier-dlq` | 3 | 7 days |
+| `job-created` | 3 | 1 day |
+| `page-scraped` | TBD | TBD |
 | `crawl-complete` | 3 | 1 day |
 | `answer-ready` | 3 | 1 day |
 | `result-saved` | 3 | 1 day |
+
+## BullMQ queues (not Kafka — noted here since they sit inline in the same pipeline)
+
+The Scraper and Indexer each front their Kafka consumer with a BullMQ queue instead of a second
+Kafka topic, so retries/failures are BullMQ's `attempts`/`backoff` rather than a hand-rolled Kafka
+retry/DLQ topic. Full detail in `docs/planning/03-crawler-scraper-indexing-plan.md`.
+
+| Queue | Producer | Worker | Backed by |
+|---|---|---|---|
+| `process-url` | Scraper's Frontier Consumer | Scraper Worker(s) | Redis (BullMQ) |
+| `index-page` | Indexer's Index Intake Consumer | Indexing Worker(s) | Redis (BullMQ) |

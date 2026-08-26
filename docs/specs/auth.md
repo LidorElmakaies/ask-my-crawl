@@ -1,8 +1,9 @@
 # Auth
 
 **Implemented** — Auth Service (`backend/apps/auth`), TypeORM against Postgres, following the
-clean-architecture layering in `backend-architecture.md`. Runs standalone on port 8001 today; not
-yet proxied through the Gateway (see `services.md` / `api-contracts.md`).
+clean-architecture layering in `backend-architecture.md`. Runs on its own port (8001), but every
+route is proxied through the Gateway (see `services.md` / `api-contracts.md`) — the frontend never
+calls Auth Service directly.
 
 ## Roles
 
@@ -21,7 +22,7 @@ user missing the relevant field — no hard requirement to supply them up front)
 lowercased before storage/lookup, so case doesn't create duplicate accounts. All new registrations
 get `role: 'user'`; there is no public path to create an `admin`.
 
-**First-admin bootstrap — resolved: env-based auto-seed.** On Auth Service startup
+**First-admin bootstrap: env-based auto-seed.** On Auth Service startup
 (`AdminSeedService`), if `ADMIN_EMAIL`/`ADMIN_PASSWORD` are both set and no admin exists yet: promote
 that user to admin if already registered, otherwise create the account. A no-op once any admin
 exists, so the env vars are safe to leave set permanently rather than needing to be unset after

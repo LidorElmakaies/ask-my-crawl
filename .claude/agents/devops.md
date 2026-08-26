@@ -11,15 +11,35 @@ focus or scope-creep into the compose setup now.
 
 ## What you're deploying
 
-Seven NestJS services planned (see `docs/specs/services.md`), built from `backend/apps/*` (Nest
-monorepo — see the `backend` agent). **`gateway` and `auth` are real and running today**; the other
-five don't exist yet. Plus a **web preview** of the frontend — a static `expo export --platform
-web` build served by Caddy (`frontend/Dockerfile` + `frontend/Caddyfile`). Android/iOS are not
-containerized (nothing to gain — no compiled runtime to isolate, and it actively breaks
-phone/simulator connectivity) and still run via `npx expo start` locally. **Kafka is up** (broker +
-explicit topic creation, see below) — no service produces/consumes yet, since Crawl Worker (the
-first consumer) doesn't exist. Redis still isn't in the stack — nothing depends on it until Crawl
-Worker exists.
+NestJS services planned, see `docs/specs/services.md`, built from `backend/apps/*` (Nest monorepo —
+see the `backend` agent). **`gateway` and `auth` are real and running today**; the rest don't exist
+yet. Plus a **web preview** of the frontend — a static `expo export --platform web` build served by
+Caddy (`frontend/Dockerfile` + `frontend/Caddyfile`). Android/iOS are not containerized (nothing to
+gain — no compiled runtime to isolate, and it actively breaks phone/simulator connectivity) and
+still run via `npx expo start` locally. **Kafka is up** — `crawl-frontier` and `crawl-complete` are
+created by `kafka-init` (see below) as the agreed wire contract, but nothing produces or consumes
+either right now.
+
+**Scraper/Indexer's infra is designed, not built** — see
+`docs/planning/03-crawler-scraper-indexing-plan.md`. When those services actually get built, this
+stack needs four new pieces, none of which exist in `devops/` yet:
+- **Redis** — not implemented, no `devops/redis/docker-compose.yml` yet (add it then, following the
+  `./data/postgres`-style persistence convention below). Backs BullMQ (`process-url`, `index-page`
+  queues) and the per-job coordination keys (dedup set, pending counters, completion guard) —
+  shared by both Scraper and Indexer, one instance, not one per service.
+- **SeaweedFS** (self-hosted, S3-compatible blob store) — raw scraped HTML. No compose service yet.
+- **Milvus** (self-hosted vector DB) — replaces the pgvector plan entirely; embeddings never touch
+  Postgres now. Milvus itself typically needs etcd + object storage as its own dependencies — check
+  its current official docker-compose reference before hand-rolling a minimal setup.
+- **LM Studio** — **not containerized.** It's a desktop app exposing an OpenAI-compatible HTTP
+  server on the host (default `http://localhost:1234`), not a compose service. Whichever container
+  runs the Indexing Worker needs a host-reachable address for it (`host.docker.internal` on Docker
+  Desktop for Windows/Mac — confirm the equivalent if this ever runs on Linux, where that hostname
+  doesn't resolve by default) — flag this as a real piece of wiring when the Indexer is actually
+  built, don't assume a compose service name will work.
+
+Don't stand any of these up speculatively — same "as they're built" discipline as everything else
+in this file.
 
 ## Docker Compose — implemented, running today
 
@@ -27,12 +47,12 @@ Worker exists.
 
 | Service | Image/build | Port | Notes |
 |---|---|---|---|
-| `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector yet — nothing needs it until Search Result Manager exists, swap the image then |
+| `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector extension — per the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`), pgvector **isn't needed at all**: embeddings live in a separate self-hosted Milvus instance, not Postgres. Don't swap this image for a pgvector-enabled one |
 | `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime + HTTP proxy to Auth Service (`/auth/*`, `/me`, `/admin/users*`); CORS enabled (`origin: true`, dev-permissive) |
 | `auth` | `backend/apps/auth/Dockerfile` | 8001 | Called only by the Gateway now (server-to-server) — the frontend never reaches this directly, that's a hard project rule. CORS still enabled (`origin: true`) but is dead config at this point; port still published to the host for direct debugging/curl, not because anything else needs it — worth reconsidering both, not done yet |
 | `frontend` | `frontend/Dockerfile` | 8081 | Caddy serving the static web export |
-| `kafka` | `apache/kafka:4.3.1` | 9092 (host, via `PLAINTEXT_HOST`) | Single-broker KRaft (combined broker+controller), no Zookeeper. In-network services use `kafka:19092` (`PLAINTEXT` listener); `9092`/`PLAINTEXT_HOST` is for host-side debugging tools only. No service produces/consumes yet — see "Kafka" section below |
-| `kafka-init` | `apache/kafka:4.3.1` | — | One-off: creates every topic in `docs/specs/event-schemas.md`'s table explicitly (`kafka-topics.sh --create`), then exits. Runs after `kafka` reports healthy (`depends_on: condition: service_healthy`), not just started |
+| `kafka` | `apache/kafka:4.3.1` | 9092 (host, via `PLAINTEXT_HOST`) | Single-broker KRaft (combined broker+controller), no Zookeeper. In-network services use `kafka:19092` (`PLAINTEXT` listener); `9092`/`PLAINTEXT_HOST` is for host-side debugging tools only. No producer/consumer wired up yet — see "Kafka" section below |
+| `kafka-init` | `apache/kafka:4.3.1` | — | One-off: creates two topics (`crawl-frontier`, `crawl-complete` — matching `docs/specs/event-schemas.md`'s table; `answer-ready`/`result-saved` still unadded, see "Kafka" below) (`kafka-topics.sh --create`), then exits. Runs after `kafka` reports healthy (`depends_on: condition: service_healthy`), not just started |
 
 - **Done**: joined to `devops/observability/`'s network, `gateway`/`auth` send real OTel telemetry
   — see the "OpenTelemetry" section below for the full picture, including two real bugs found and
@@ -41,8 +61,8 @@ Worker exists.
   below), and `:latest` image tags that had silently drifted Tempo onto an incompatible config
   schema (every observability image is pinned now).
 - **Kafka: built and verified** — see the "Kafka" section below for the full picture (image
-  choice, listener layout, topic list, and the real produce/consume proof). Redis is still not
-  built — add when Crawl Worker needs it.
+  choice, listener layout, topic list, and the real produce/consume proof); no service is wired up
+  as a producer/consumer yet. **No Redis** — nothing in this project currently touches Redis.
 - **No Makefile for `devops/`, deliberately** — one existed briefly (mirroring `devops/
   observability/Makefile`'s convention) but was removed: `make` isn't installed on the actual dev
   machine this project runs on, so it was dead weight nobody could use, not a convenience. Operate
@@ -98,7 +118,9 @@ it already runs from the directory `devops/.env` lives in.
 | NestJS services | compose service, one per app | ECS Fargate, one service per app, behind an internal ALB; only Gateway is internet-facing (public ALB) |
 | Kafka | single-broker container | Amazon MSK |
 | Redis | container | Amazon ElastiCache for Redis |
-| Postgres + pgvector | container | Amazon RDS for PostgreSQL |
+| Postgres | container | Amazon RDS for PostgreSQL |
+| Milvus | container(s) (self-hosted) | still self-hosted, or a managed alternative — not decided |
+| SeaweedFS | container(s) (self-hosted) | still self-hosted, or Amazon S3 directly — not decided |
 | Observability | `devops/observability` docker-compose | same containers on ECS Fargate first; Amazon Managed Grafana/Prometheus or CloudWatch later, not a requirement |
 | Secrets | `.env` file | AWS Secrets Manager / SSM Parameter Store |
 | Networking | one Docker network | VPC: public subnets for ALB + Gateway, private subnets for everything else |
@@ -387,8 +409,8 @@ no Zookeeper container, matching the decided image choice above.
 (`apache/kafka`'s `docker/examples/docker-compose-files/single-node/plaintext/docker-compose.yml`),
 not invented from scratch:
 - `PLAINTEXT` on `19092`, advertised as `kafka:19092` — what every other container on the
-  `askmycrawl` network (including `kafka-init`, and eventually Crawl Worker/Search Result
-  Manager/etc.) uses as its bootstrap server.
+  `askmycrawl` network (including `kafka-init`, and eventually whatever crawls/scrapes, Search
+  Result Manager, etc.) uses as its bootstrap server.
 - `PLAINTEXT_HOST` on `9092`, advertised as `localhost:9092`, published to the host — for local
   debugging only (`kcat`, a host-side script), not used by any in-network service.
 - `CONTROLLER` on `29093` — KRaft's internal quorum listener, not client-facing.
@@ -405,22 +427,25 @@ directory.
 
 **Topics are created explicitly by `kafka-init`, matching decided policy — `auto.create.topics.
 enable` stays `false`.** `kafka-init` runs `kafka-topics.sh --create --if-not-exists` once per
-topic in `docs/specs/event-schemas.md`'s table, then `--describe`s all of them (visible in
-`docker compose logs kafka-init`) and exits. `depends_on: kafka: condition: service_healthy` (not
-just `service_started`) — `kafka-topics.sh` would otherwise race the broker's own KRaft bootstrap.
-Created, verified against the spec table (all replication-factor 1 — single broker, spec doesn't
-specify one so this is the only valid choice — with retention config also set explicitly from the
-spec's table):
+topic that has at least one producer/consumer designed for it already, even if not yet built (the
+rest await their producing/consuming service, per the 2026-08-20 one-at-a-time decision), then
+`--describe`s all of them (visible in `docker compose logs kafka-init`) and exits.
+`depends_on: kafka: condition: service_healthy` (not just `service_started`) — `kafka-topics.sh`
+would otherwise race the broker's own KRaft bootstrap. Created, verified against the spec table
+(all replication-factor 1 — single broker, spec doesn't specify one so this is the only valid
+choice — with retention config also set explicitly from the spec's table):
 
-| Topic | Partitions (spec / actual) | Retention (spec / actual) |
-|---|---|---|
-| `crawl-frontier` | 6 / 6 | 1 day / `retention.ms=86400000` |
-| `crawl-frontier-dlq` | 3 / 3 | 7 days / `retention.ms=604800000` |
-| `crawl-complete` | 3 / 3 | 1 day / `retention.ms=86400000` |
-| `answer-ready` | 3 / 3 | 1 day / `retention.ms=86400000` |
-| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` |
+| Topic | Partitions (spec / actual) | Retention (spec / actual) | Status |
+|---|---|---|---|
+| `crawl-frontier` | 6 / 6 | 1 day / `retention.ms=86400000` | created; no producer/consumer wired up |
+| `crawl-complete` | 3 / 3 | 1 day / `retention.ms=86400000` | created; no producer/consumer wired up (same) |
+| `page-scraped` | TBD / — | TBD / — | not yet created — part of the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`); partition/retention deliberately left TBD there, decide when actually wiring up `kafka-init` for it |
+| `job-requests` | 3 / 3 | 1 day / `retention.ms=86400000` | not yet created — awaits Gateway/Job Manager Service |
+| `job-created` | 3 / 3 | 1 day / `retention.ms=86400000` | not yet created — awaits Job Manager Service |
+| `answer-ready` | 3 / 3 | 1 day / `retention.ms=86400000` | not yet created — awaits Query/Answer Service |
+| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` | not yet created — awaits Job Manager Service |
 
-No mismatches — every topic matches `event-schemas.md`'s table exactly.
+No mismatches on the two created topics — they match `event-schemas.md`'s table exactly.
 
 **Verified with a real produce/consume round-trip, not just "container is `Up`.`"** First attempt
 (`docker exec devops-kafka-1 kafka-console-producer.sh ... <<'EOF' ... EOF`) silently produced
@@ -440,8 +465,9 @@ case) when verifying, the same discipline as everywhere else in this file.**
 re-formatted directory, see above).
 
 **Not done, deliberately out of scope for this pass**: no service produces or consumes any topic
-yet (Crawl Worker, the first consumer, isn't built — see "What you're deploying" above); no
-`backend/libs/kafka-contracts` lib exists yet for typed event payloads (referenced in
-`backend-architecture.md`'s DTOs section as future work, not built); no broker-level observability
-(see the `observability` network decision above). None of these block Crawl Worker's future build —
-they're its dependencies, not this pass's.
+right now (see "What you're deploying" above); `backend/libs/kafka-contracts` (typed event
+payloads) exists but nothing imports it yet; no broker-level observability (see the
+`observability` network decision above); `page-scraped` isn't created yet (see the topic table
+above); Redis/SeaweedFS/Milvus have no compose service definitions yet (see "What you're
+deploying" above) — all deferred to when the Scraper/Indexer are actually built, per
+`docs/planning/03-crawler-scraper-indexing-plan.md`.

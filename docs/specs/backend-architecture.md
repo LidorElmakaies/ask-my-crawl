@@ -1,7 +1,7 @@
 # Backend Architecture — Clean/Hexagonal Layering
 
-Every NestJS service in `services.md` (Gateway, Auth, Crawl Worker, Search Result Manager,
-Query/Answer, Notification, Crawl Result Manager) follows the same internal 3-layer structure. The
+Every NestJS service in `services.md` (Gateway, Auth, Scraper, Indexer, Query/Answer, Notification,
+Job Manager Service) follows the same internal 3-layer structure. The
 dependency rule is one-directional: **API → Application → Infrastructure**, and at every boundary
 the caller depends on an **interface**, never a concrete class. This is what makes "swap Postgres
 for Mongo" or "swap salt+pepper+SHA-256 for plain SHA-256" a new-adapter-plus-one-DI-binding change,
@@ -33,6 +33,13 @@ specific libraries and external systems.
 > exactly like calling Postgres or an external API, so it's an Infrastructure adapter behind an
 > interface the Application layer defines a dependency on (e.g. `IEventPublisher`). Never call
 > `kafkaClient.emit(...)` directly from Application or API code.
+>
+> **Same rule for BullMQ, in both directions** — see
+> `docs/planning/03-crawler-scraper-indexing-plan.md`. A BullMQ **worker**'s `process`
+> function is an inbound trigger, same as a Kafka consumer — API layer, behind whatever the
+> service calls its equivalent of `@EventPattern`. **Enqueuing** a job onto a BullMQ queue is an
+> outbound side effect — Infrastructure, behind an interface like `IProcessUrlQueue`/
+> `IIndexPageQueue`, never called directly (`queue.add(...)`) from Application or API code.
 
 ## Folder structure — each layer owns an `interfaces/` subfolder for what *it* implements
 
@@ -110,9 +117,13 @@ otherwise): flat.** One `models/`, `api/`, `application/`, `infrastructure/` at 
 root, one `<service>.module.ts` binding all their tokens. This is Auth Service's actual layout
 today — `apps/auth/src/{models,api,application,infrastructure}`, no extra nesting — because
 registering/authenticating/managing users is one bounded concern, however many files it takes.
-Crawl Worker's pipeline (visited-set claim, cache check, fetch, clean, BFS expansion, fan-in
-counter) is complex internally but is still **one** concern end to end — it stays flat too, the
-same way. Complexity of a concern isn't the trigger for nesting; a second, unrelated concern is.
+**Scraper and Indexer both follow the same test**: each is internally complex (Scraper: Frontier
+Consumer's dedup gate + Scraper Worker's fetch/save/BFS-expand pipeline; Indexer: Index Intake
+Consumer's bridge + Indexing Worker's clean/chunk/embed/upsert pipeline) but each is still **one**
+concern end to end (per `docs/planning/03-crawler-scraper-indexing-plan.md`), so both stay flat —
+complexity of a concern isn't the trigger for nesting, a second, unrelated concern is. Splitting
+them into two services (Scraper, Indexer) instead of one combined app isn't "nesting" either — each
+is its own flat, single-concern app.
 
 **Exception — multi-concern (Gateway today, possibly nothing else): each concern gets its own
 folder**, each with its own `api/`/`application/`/`infrastructure/` (and its own `models/` only if
@@ -144,7 +155,7 @@ apps/gateway/src/
 **The test, when it's not obvious: would these concerns ever share a model, an Application
 service, or an Infrastructure adapter — or would one ever call the other?** If no to all three,
 they're independent and each gets its own folder. If a future concern (e.g. a `jobs-proxy/` for
-`POST/GET /jobs*` → Crawl Result Manager, per `services.md`) is added to Gateway, it follows the
+`POST/GET /jobs*` → Job Manager Service, per `services.md`) is added to Gateway, it follows the
 identical shape as a third sibling folder, not a special case.
 
 **DI tokens for a multi-concern app stay in one file at the app root** (`tokens.ts`), grouped by
@@ -209,13 +220,18 @@ export class AuthModule {}
 
 ## Applies beyond HTTP services too
 
-Kafka consumers and WebSocket gateways are still "API layer" — a Crawl Worker's
-`@EventPattern('crawl-frontier')` handler does input parsing and calls into the Application layer's
-crawl use case (through its interface); it does not itself touch Redis, Postgres, the fetch client,
-or Kafka producers. Those are all Infrastructure adapters (`RedisVisitedSetAdapter`,
-`PostgresPageRepository`, `HttpPageFetcher`, `KafkaCrawlFrontierProducer`, ...) behind interfaces
-the Application layer depends on (`IVisitedSet`, `IPageRepository`, `IPageFetcher`,
-`IEventPublisher`) — all declared in that service's `infrastructure/interfaces/`.
+Kafka consumers, BullMQ workers, and WebSocket gateways are all still "API layer" — the Scraper's
+`@EventPattern('crawl-frontier')` handler (Frontier Consumer) does input parsing and calls into the
+Application layer's dedup/claim use case (through its interface); the `process-url` BullMQ worker
+(Scraper Worker) does the same for the fetch use case. Neither touches Redis, SeaweedFS, the fetch
+client, or Kafka/BullMQ producers directly. Those are all Infrastructure adapters (illustrative
+names only — `RedisCoordinationStoreAdapter`, `SeaweedFsBlobRepository`, `HttpPageFetcher`,
+`KafkaCrawlFrontierProducer`, `BullMqProcessUrlQueue`, ...) behind interfaces the Application layer
+depends on (`ICoordinationStore`, `IBlobRepository`, `IPageFetcher`, `IEventPublisher`,
+`IProcessUrlQueue`) — all declared in that service's `infrastructure/interfaces/`. Same shape on
+the Indexer's side: Index Intake Consumer / Indexing Worker (API) → an indexing use case
+(Application) → `IBlobRepository` (read), `IEmbeddingClient`, `IVectorStore` (Milvus),
+`ICoordinationStore` (Redis) (Infrastructure).
 
 ## Why this matters for testing
 

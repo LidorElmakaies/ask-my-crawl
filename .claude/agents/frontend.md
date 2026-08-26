@@ -38,11 +38,14 @@ user-based app. Concretely, on top of the existing structure:
     that's a hard project rule, not a stopgap. Request/response bodies stay snake_case exactly as
     `api-contracts.md` documents (`phone_number`, `access_token`, ...); don't translate case
     client-side.
-- **The scraper flow becomes async.** `scraperSlice`'s `submitScrapeRequest` currently expects an
-  immediate response; per `docs/specs/api-contracts.md`, `POST /jobs` now returns `202` with a
-  `job` in `status: "pending"` — the answer arrives later via the WebSocket push or a
-  `GET /jobs/:id` poll, not in the POST response. Expect to rework this slice into something closer
-  to `submitJob` (fire-and-forget) + a jobs list kept current via WS events.
+- **The scraper flow is async.** `scraperSlice`'s `submitScrapeRequest` currently expects an
+  immediate response; per `docs/specs/api-contracts.md`, `POST /jobs` returns `202` with just
+  `{ status: "accepted" }` — **no job object, no `job_id`** (Gateway never has one to give
+  synchronously). The real `job_id` arrives later via a `job.created` WebSocket push, and the
+  answer via `job.completed` or a `GET /jobs/:id` poll — a `job`'s shape is `{ id, user_id, url,
+  query, result }`, where `result` is `null` until answered (no `status` field on the job at all,
+  see `docs/specs/data-model.md`). Expect to rework this slice into something closer to `submitJob`
+  (fire-and-forget) + a jobs list kept current via WS events.
   - `scraperSlice`'s "ephemeral, never persisted" rule from `CLAUDE.md` still applies to in-flight
     submission state — but the resulting job history is a new, separate concern (see below) and
     *should* be readable across app restarts (via `GET /jobs`, not local persistence).

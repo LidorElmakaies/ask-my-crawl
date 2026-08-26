@@ -1,13 +1,16 @@
 # Data Model
 
-Single Postgres instance for the project's scale, `pgvector` extension enabled. Tables are grouped
-by **owning service** below — even sharing one physical database, only the owning service should
-write to its tables directly; other services go through that service's API/events.
+Single Postgres instance for the project's scale. Tables are grouped by **owning service** below —
+even sharing one physical database, only the owning service should write to its tables directly;
+other services go through that service's API/events.
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
 ```
+
+`pgvector` isn't needed — embeddings live in a self-hosted **Milvus** instance instead (see "Owned
+by the Scraper and the Indexer" below, and `docs/planning/03-crawler-scraper-indexing-plan.md`).
+Postgres holds only relational data (users, jobs, notifications) for this project.
 
 ## Owned by Auth Service
 
@@ -44,75 +47,87 @@ CREATE TABLE refresh_tokens (
 CREATE INDEX ON refresh_tokens (user_id);
 ```
 
-## Owned by Crawl Result Manager
+## Owned by Job Manager Service
+
+**Not implemented.** One table.
 
 ```sql
-CREATE TYPE job_status AS ENUM ('pending', 'crawling', 'answering', 'completed', 'failed');
-
 CREATE TABLE jobs (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID NOT NULL REFERENCES users(id),
-  seed_url      TEXT NOT NULL,
-  query         TEXT NOT NULL,             -- the user's question
-  depth_limit   INT NOT NULL DEFAULT 3,
-  status        job_status NOT NULL DEFAULT 'pending',
-  error_message TEXT,                      -- populated if status = 'failed'
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  completed_at  TIMESTAMPTZ
+  id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),  -- the job_id — generated here, not by the
+                                                          -- client; this is the only place a job_id
+                                                          -- comes from, see event-schemas.md's
+                                                          -- job-requests/job-created
+  user_id  UUID NOT NULL REFERENCES users(id),           -- the requesting/recipient user — as sent
+                                                          -- on job-requests
+  url      TEXT NOT NULL,                                -- the seed URL — as sent on job-requests
+  query    TEXT NOT NULL,                                -- the user's question — as sent on
+                                                          -- job-requests
+  result   TEXT                                          -- NULL until Query/Answer's answer comes
+                                                          -- back (answer-ready); Job Manager Service
+                                                          -- writes the answer text in here and
+                                                          -- nowhere else. NULL is the only "not done
+                                                          -- yet" signal — there is no separate
+                                                          -- status column (see below).
 );
 CREATE INDEX ON jobs (user_id);
-CREATE INDEX ON jobs (status);
-
-CREATE TABLE results (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  job_id        UUID NOT NULL UNIQUE REFERENCES jobs(id) ON DELETE CASCADE,
-  answer_text   TEXT NOT NULL,
-  source_page_ids UUID[] NOT NULL,         -- pages.id values the LLM answer drew from
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
 ```
 
-## Owned by Search Result Manager
+`user_id`/`url`/`query` are exactly the 3 fields Gateway sends on `job-requests` — Job Manager
+Service adds only the generated `id` and a `result` that starts `NULL`.
 
-```sql
-CREATE TABLE pages (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  url              TEXT NOT NULL UNIQUE,   -- normalized form, see auth.md / event-schemas.md
-  url_hash         TEXT NOT NULL UNIQUE,   -- sha256(url), matches Redis page:{url_hash} key
-  content          TEXT NOT NULL,          -- LangChain-cleaned text
-  outbound_links   JSONB NOT NULL DEFAULT '[]', -- normalized child URLs found on this page —
-                                                  -- needed so a cache-hit job can still expand
-                                                  -- its own BFS without re-fetching the page
-  scraped_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX ON pages (url_hash);
+Real gaps in this table, worth stating plainly rather than glossing over:
 
--- One row per embedded chunk of a page (a page's cleaned text is split before embedding).
-CREATE TABLE page_chunks (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  page_id      UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-  chunk_index  INT NOT NULL,
-  chunk_text   TEXT NOT NULL,
-  embedding    VECTOR(1536) NOT NULL       -- dimension depends on embedding model — TBD, see specs/README.md
-);
-CREATE INDEX ON page_chunks (page_id);
-CREATE INDEX ON page_chunks USING ivfflat (embedding vector_cosine_ops);
+- **No max-depth column.** Max crawl depth is a fixed system constant (`MAX_CRAWL_DEPTH`, currently
+  `3` per the product spec, "crawl depth is capped at 3"), never client-provided and never varies
+  per job today, so there's nothing to store per row. It lives in `libs/kafka-contracts` (not
+  Scraper-local — Job Manager Service is the one that has to set it, as the starting value of the
+  `crawl-frontier` seed message's `depth` field — see `event-schemas.md`), since both Job Manager
+  Service (producer) and the Scraper (consumer/decrementer) need to agree on it. May become
+  configurable (e.g. per-job or per-user-tier) later; nothing reads it as anything but a constant
+  today.
+- **No status column.** "Done" is just `result IS NOT NULL`. There is no in-between state
+  (`crawling`/`answering`) represented anywhere in Postgres, and no `failed` state either — a crawl
+  or answer failure isn't captured on this row at all. This is a real gap, not a considered decision
+  to omit failure handling forever: revisit before building Job Manager Service if failed jobs need
+  to surface as anything other than "still says NULL forever."
+- **No timestamps, no error tracking** on this table.
+- **No source attribution.** The answer text is the only thing this table stores — which URLs it
+  drew from isn't persisted anywhere in Postgres. Query/Answer Service produces that list
+  transiently, during its retrieval step against the Indexer, to build the LLM prompt, but nothing
+  carries it further than that call. Flag before assuming the frontend can ever show "answer drew
+  from these pages" — that data doesn't survive past the RAG call under this design.
 
--- Which pages belong to which job's answer corpus (scopes RAG queries to one job,
--- even though `pages` content is shared/cached globally across all jobs).
-CREATE TABLE job_pages (
-  job_id       UUID NOT NULL, -- references jobs(id), cross-service FK not enforced at DB level
-  page_id      UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
-  depth_found  INT NOT NULL,             -- depth this page was discovered at within this job
-  PRIMARY KEY (job_id, page_id)
-);
-```
+## Owned by the Scraper and the Indexer
 
-> `job_pages.job_id` references a table owned by a different service (Crawl Result Manager). No
-> DB-level foreign key across service boundaries — consistency is maintained by the Crawl Worker,
-> which only ever inserts a `job_pages` row for a `job_id` it received in a valid Kafka message.
+**Not implemented.** Neither owns a Postgres table:
+
+- **Scraper** writes raw HTML to **SeaweedFS** (self-hosted, S3-compatible blob store), keyed by
+  `sha256(normalizedUrl)`. No freshness/TTL logic, no cross-job cache — every job fetches and
+  overwrites the blob for a URL it visits.
+- **Indexer** writes embedded chunks to **Milvus** (self-hosted vector DB). Milvus needs an explicit
+  collection schema, not inferred from writes:
+  - **Vector field**: dimension TBD — set by whichever embedding model is loaded into LM Studio
+    (e.g. 768 or 1024, model-dependent; see `docs/specs/README.md`'s stack section). Index
+    type/metric: `HNSW` + `COSINE`.
+  - **Scalar fields** (filterable/deletable on): `job_id`, `user_id`, `url`, `query`, `chunk_index`,
+    `scraped_at`.
+  - On re-scrape, the Indexing Worker deletes existing vectors for a `url` (Milvus delete-by-filter,
+    e.g. `url == "..."`) before upserting the new chunks.
+  - `job_id` as a scalar field is what scopes a RAG query to one job's crawl — there's no cross-job
+    content sharing in this design (every job re-fetches and overwrites), so nothing beyond the
+    `job_id` already stamped on each chunk is needed to express "which pages belong to which job."
+
+Both services share **Redis** coordination state (dedup set, pending-work counters, completion race
+guard) — see "Redis" below. That's ephemeral job-coordination plumbing, not owned domain data, the
+same way both already share the `crawl-frontier`/`page-scraped`/`crawl-complete` Kafka topics.
+
+**Not designed**: the read/retrieval API the Indexer needs to expose for Query/Answer Service's
+query-time similarity search — flagged in `services.md`'s Indexer section, don't invent a shape for
+it here.
 
 ## Owned by Notification Service
+
+**Not implemented.**
 
 ```sql
 CREATE TYPE notification_channel AS ENUM ('email', 'sms', 'telegram');
@@ -131,12 +146,23 @@ CREATE INDEX ON notifications_log (job_id);
 CREATE INDEX ON notifications_log (user_id);
 ```
 
-## Redis (not Postgres — ephemeral/coordination state only)
+## Redis
 
-See [planning notes §3](../planning/01-architecture-notes.md#3-redis--decided-design) for full detail.
+**Not implemented.** Per-job coordination state shared between the Scraper and the Indexer (dedup
+set, two pending-work counters, completion race guard), plus BullMQ's own internal queue keys for
+the `process-url`/`index-page` queues. Not a table of record for either service — see "Owned by the
+Scraper and the Indexer" above. Full key list in
+`docs/planning/03-crawler-scraper-indexing-plan.md`'s "Redis keys" table:
 
-| Key | Type | TTL | Purpose |
-|---|---|---|---|
-| `job:{job_id}:visited` | Set | ~48h | per-job BFS visited/claim set |
-| `job:{job_id}:pending` | Integer | ~2h | fan-out/fan-in completion counter |
-| `page:{url_hash}` | String (`SET NX EX`) | 3 days | global "don't re-scrape this URL yet" marker |
+| Key | Type | Purpose |
+|---|---|---|
+| `crawl:{job_id}:visited` | Set | authoritative per-job dedup gate |
+| `job:{job_id}:pending_scrape` | Int | completion tracking |
+| `job:{job_id}:pending_index` | Int | completion tracking |
+| `job:{job_id}:succeeded` | Set | URLs that finished the full pipeline successfully |
+| `job:{job_id}:failed` | Set | URLs that terminally failed (scrape or index stage) |
+| `job:{job_id}:meta` | Hash | `user_id`, `query`, `base_url`, `base_domain`, `status`, `created_at` |
+| `job:{job_id}:notified` | flag | race guard, completion fires exactly once |
+
+All job-scoped keys get a short cleanup TTL (e.g. 1 hour) once a job completes — no indefinite
+growth. No global cross-job cache.
