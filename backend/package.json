@@ -6,10 +6,11 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build:libs": "nest build auth-kernel && nest build dtos && nest build otel",
+    "build:libs": "nest build auth-kernel && nest build dtos && nest build otel && nest build kafka-contracts",
     "build:gateway": "npm run build:libs && nest build gateway && tsc-alias -p tsconfig.json",
     "build:auth": "npm run build:libs && nest build auth && tsc-alias -p tsconfig.json",
-    "build": "npm run build:libs && nest build gateway && nest build auth && tsc-alias -p tsconfig.json",
+    "build:job-manager": "npm run build:libs && nest build job-manager && tsc-alias -p tsconfig.json",
+    "build": "npm run build:libs && nest build gateway && nest build auth && nest build job-manager && tsc-alias -p tsconfig.json",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -19,16 +20,19 @@
     "test": "jest --config jest.config.js",
     "test:watch": "jest --config jest.config.js --watch",
     "test:cov": "jest --config jest.config.js --coverage",
+    "test:integration": "jest --config jest-integration.config.js --runInBand",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --config jest.config.js --runInBand",
     "test:e2e:gateway": "jest --config ./apps/gateway/test/jest-e2e.config.js",
     "test:e2e:auth": "jest --config ./apps/auth/test/jest-e2e.config.js",
-    "test:e2e": "npm run test:e2e:gateway && npm run test:e2e:auth"
+    "test:e2e:job-manager": "jest --config ./apps/job-manager/test/jest-e2e.config.js",
+    "test:e2e": "npm run test:e2e:gateway && npm run test:e2e:auth && npm run test:e2e:job-manager"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.4",
-    "@nestjs/core": "^11.0.1",
+    "@nestjs/core": "^11.2.3",
+    "@nestjs/microservices": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-socket.io": "^11.2.1",
     "@nestjs/typeorm": "^11.0.3",
@@ -49,11 +53,12 @@
     "class-validator": "^0.15.1",
     "http-proxy-middleware": "^4.2.0",
     "jsonwebtoken": "^9.0.3",
+    "kafkajs": "^2.2.4",
     "pg": "^8.23.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3",
-    "typeorm": "^1.1.0"
+    "typeorm": "^0.3.27"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -61,6 +66,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@nestjs/testing": "^11.0.1",
+    "@testcontainers/kafka": "^12.1.0",
     "@testcontainers/postgresql": "^12.1.0",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",

@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    // See apps/gateway/tsconfig.app.json for why rootDir/outDir point at the monorepo root.
+    "rootDir": "../..",
+    "outDir": "../../dist",
+    "tsBuildInfoFile": "../../dist/.tsbuildinfo-job-manager"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*spec.ts"]
+}

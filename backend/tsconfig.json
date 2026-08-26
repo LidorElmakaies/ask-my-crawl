@@ -39,6 +39,18 @@
       ],
       "@app/otel/*": [
         "libs/otel/src/*"
+      ],
+      "@app/kafka-contracts": [
+        "libs/kafka-contracts/src"
+      ],
+      "@app/kafka-contracts/*": [
+        "libs/kafka-contracts/src/*"
+      ],
+      "@app/testing": [
+        "libs/testing/src"
+      ],
+      "@app/testing/*": [
+        "libs/testing/src/*"
       ]
     }
   }

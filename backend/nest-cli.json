@@ -54,6 +54,24 @@
       "compilerOptions": {
         "tsConfigPath": "apps/gateway/tsconfig.app.json"
       }
+    },
+    "kafka-contracts": {
+      "type": "library",
+      "root": "libs/kafka-contracts",
+      "entryFile": "index",
+      "sourceRoot": "libs/kafka-contracts/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/kafka-contracts/tsconfig.lib.json"
+      }
+    },
+    "job-manager": {
+      "type": "application",
+      "root": "apps/job-manager",
+      "entryFile": "main",
+      "sourceRoot": "apps/job-manager/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/job-manager/tsconfig.app.json"
+      }
     }
   }
 }
