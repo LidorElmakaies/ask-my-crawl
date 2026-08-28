@@ -28,4 +28,14 @@ export interface CrawlFrontierMessage {
    */
   depth: number;
   query: string;
+  /**
+   * The job's original seed URL — same propagate-only pattern as `query`. Job Manager Service
+   * sets it once on the seed message (equal to that same message's own `url`); the Scraper copies
+   * it through unchanged on every child message it re-publishes. Exists so the Scraper can enforce
+   * the same-domain link filter against the *seed's* domain (not whatever page a link was found
+   * on) and build `crawl-complete`'s payload, without a synchronous call back to Job Manager
+   * Service or a separate Redis-stored copy — see
+   * docs/planning/03-crawler-scraper-indexing-plan.md §3/§6.
+   */
+  base_url: string;
 }

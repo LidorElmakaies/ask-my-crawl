@@ -14,8 +14,12 @@
 
 import type { LoggerService } from '@nestjs/common';
 import { context as otelContext, trace } from '@opentelemetry/api';
-import { logs, SeverityNumber, type AnyValueMap } from '@opentelemetry/api-logs';
-import { getOtelServiceName } from './start-otel';
+import {
+  logs,
+  SeverityNumber,
+  type AnyValueMap,
+} from '@opentelemetry/api-logs';
+import { getOtelServiceInstanceId, getOtelServiceName } from './start-otel';
 
 type Severity = { number: SeverityNumber; text: string };
 
@@ -75,7 +79,8 @@ export class OtelLogger implements LoggerService {
     if (params.length > 0 && typeof params[params.length - 1] === 'string') {
       logContext = params.pop() as string;
     }
-    const details = params.length > 0 ? params.map(stringify).join(' ') : undefined;
+    const details =
+      params.length > 0 ? params.map(stringify).join(' ') : undefined;
 
     // Whatever span is active when this log call happens (e.g. inside an HTTP request handler) —
     // undefined during bootstrap, before any request has an active span. Read once, used for both
@@ -83,12 +88,18 @@ export class OtelLogger implements LoggerService {
     // synchronously, right here — not later, e.g. from inside an async callback).
     const spanContext = trace.getSpan(otelContext.active())?.spanContext();
 
-    // Console: human-readable, timestamped, close to Nest's own default shape
+    // Console: human-readable, timestamped, structured similarly to Nest's own default shape
     // ("[Nest] <pid>  - <date>  <LEVEL> [<context>] <message>") so `docker compose logs` didn't
-    // regress just because the logger implementation changed underneath it.
-    const consoleFn = severity.number >= SeverityNumber.ERROR ? console.error : console.log; // eslint-disable-line no-console
+    // regress just because the logger implementation changed underneath it — but the bracketed tag
+    // is the actual service name (`this.scope`, e.g. "scraper"), not the literal word "Nest": a
+    // line's text needs to say which SERVICE produced it, not just visually resemble Nest's own
+    // logger. `process.pid` alone doesn't identify which REPLICA of that service either — every
+    // container runs its Node process as PID 1 (Dockerfiles use exec-form CMD) — so
+    // `service.instance.id` (the container hostname, see start-otel.ts) rides alongside it.
+    const consoleFn =
+      severity.number >= SeverityNumber.ERROR ? console.error : console.log;
     consoleFn(
-      `[Nest] ${process.pid}  - ${new Date().toISOString()}  ${severity.text}` +
+      `[${this.scope}] ${process.pid}/${getOtelServiceInstanceId()}  - ${new Date().toISOString()}  ${severity.text}` +
         `${logContext ? ` [${logContext}]` : ''} ${text}` +
         `${spanContext ? ` (trace_id=${spanContext.traceId})` : ''}`,
       ...(details ? [details] : []),
@@ -115,7 +126,9 @@ export class OtelLogger implements LoggerService {
         message: text,
         ...(logContext ? { context: logContext } : {}),
         ...(details ? { details } : {}),
-        ...(spanContext ? { trace_id: spanContext.traceId, span_id: spanContext.spanId } : {}),
+        ...(spanContext
+          ? { trace_id: spanContext.traceId, span_id: spanContext.spanId }
+          : {}),
       });
 
       logs.getLogger(this.scope).emit({

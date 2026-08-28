@@ -1,0 +1,30 @@
+services:
+  scraper:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    build:
+      context: ../../backend
+      dockerfile: apps/scraper/Dockerfile
+    env_file:
+      - ../../backend/.env
+    environment:
+      # Overrides the .env file's localhost-based defaults — container-to-container calls use
+      # service names, not localhost.
+      - REDIS_URL=redis://redis:6379
+      - SEAWEEDFS_ENDPOINT=http://seaweedfs:8333
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the root docker-compose.yml's networks: block).
+      - OTEL_SERVICE_NAME=scraper
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # No ports: — Kafka-only microservice, no HTTP surface. Same reasoning as job-manager.
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+    networks:
+      - askmycrawl
+      - observability

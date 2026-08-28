@@ -21,35 +21,40 @@ backend/
     gateway/              # implemented — realtime/WS via Socket.IO, plus HTTP proxy to Auth
                           # Service (src/auth-proxy/): /auth/*, /me, /admin/users*
     auth/                 # implemented — register/login/refresh/logout, /me, /admin/users*
-    scraper/              # not implemented — Frontier Consumer (crawl-frontier in/out, Redis
-                          # dedup) + Scraper Worker(s) (BullMQ `process-url`: fetch, save to
-                          # SeaweedFS, publish page-scraped). See
-                          # docs/planning/03-crawler-scraper-indexing-plan.md before creating this.
+    job-manager/          # implemented — consumes job-requests, creates the one-row `jobs` entry
+                          # (id/user_id/url/query/result — see data-model.md), publishes the
+                          # crawl-frontier seed + job-created; on answer-ready, writes the answer
+                          # into jobs.result and publishes result-saved. See services.md.
+    scraper/              # implemented — Frontier Consumer (@EventPattern('crawl-frontier'), the
+                          # Redis SADD dedup gate, enqueues BullMQ's process-url queue) +
+                          # ProcessUrlWorker (BullMQ worker: fetch, save to SeaweedFS, extract+
+                          # filter same-domain links, re-publish crawl-frontier children +
+                          # page-scraped, and — on winning the SET NX completion race — publish
+                          # crawl-complete). Verified end-to-end against a real crawl. See
+                          # docs/planning/03-crawler-scraper-indexing-plan.md for the full design
+                          # this implements.
     indexer/              # not implemented — owns embedding/vector storage (Milvus + SeaweedFS,
                           # not Postgres). Index Intake Consumer (page-scraped in) + Indexing
                           # Worker(s) (BullMQ `index-page`: clean, chunk, embed via LM Studio,
-                          # upsert to Milvus). Same planning doc.
+                          # upsert to Milvus). Same planning doc — reuses the Scraper's existing
+                          # Redis/SeaweedFS instances (devops.md's "reuse shared infrastructure"
+                          # rule), doesn't provision its own.
     query-answer/
     notification/
-    job-manager/          # not implemented — consumes job-requests (no job_id yet), creates the
-                          # one-row `jobs` entry (id/user_id/url/query/result — see
-                          # data-model.md), publishes the crawl-frontier seed + job-created; later,
-                          # on answer-ready, writes the answer into jobs.result and publishes
-                          # result-saved. See services.md.
   libs/
     auth-kernel/          # implemented — IJwtService/IAuthTokenService (sign+verify), shared by
                           # Gateway (verifies, WS handshake) and Auth Service (signs + verifies).
                           # The one lib every app needing auth imports — see its module for the
                           # DI wiring pattern to copy for future shared libs.
-    kafka-contracts/     # implemented — topic + typed payload constants for crawl-frontier/
-                          # crawl-complete, matching event-schemas.md exactly. No
-                          # producer/consumer currently imports them yet. `crawl-complete-
-                          # message.ts`'s shape is STALE against event-schemas.md's payload
-                          # (which carries succeeded/failed counts + URL lists); update it (and
-                          # add a page-scraped-message.ts) when you actually build the
-                          # Scraper/Indexer, don't let the type silently drift further from the
-                          # spec in the meantime. Every future Kafka producer/consumer should
-                          # import from here instead of redefining shapes.
+    kafka-contracts/     # implemented — topic + typed payload constants for every topic in
+                          # event-schemas.md (job-requests/crawl-frontier/job-created/
+                          # answer-ready/result-saved/crawl-complete/page-scraped), matching it
+                          # exactly. Imported by Job Manager Service and the Scraper today.
+                          # `crawl-complete-message.ts` now carries the full result-summary
+                          # shape (succeeded/failed counts + URL lists), not the old thin
+                          # {job_id, user_id, query} trigger — kept in sync when the Scraper was
+                          # built. Every future Kafka producer/consumer should import from here
+                          # instead of redefining shapes.
     dtos/                 # implemented — Auth's request DTOs + UserResponseDto. The test isn't
                           # "does the frontend send this," it's "does more than one service's
                           # code need to agree on this shape" — Auth Service implements
@@ -58,12 +63,28 @@ backend/
                           # to the owning service (see backend-architecture.md's DTOs section).
 ```
 
-**Scraper/Indexer will need dependencies not used anywhere else in this repo yet** — expect to add
-(don't add speculatively before actually building either app): `bullmq` + `ioredis` (BullMQ +
-Redis client), `@aws-sdk/client-s3` (SeaweedFS, S3-compatible), `@zilliz/milvus2-sdk-node`
-(Milvus), `@langchain/openai` (`OpenAIEmbeddings` against LM Studio's local server),
-`@langchain/community` (HTML cleaning), `@langchain/textsplitters` (`RecursiveCharacterTextSplitter`).
-Full design: `docs/planning/03-crawler-scraper-indexing-plan.md`.
+**The Scraper's dependencies**: `@nestjs/bullmq` + `bullmq` (`@Processor`/`WorkerHost`/
+`@OnWorkerEvent` for the consumer side, `@InjectQueue` for the producer side — the idiomatic
+NestJS integration, wired in `scraper.module.ts` via `BullModule.forRootAsync`/`registerQueue`),
+`ioredis` (the coordination-store client, used directly — there's no NestJS wrapper for arbitrary
+Redis commands the way `@nestjs/bullmq` wraps queues), `cheerio` (HTML link extraction),
+`@aws-sdk/client-s3` (SeaweedFS, S3-compatible, `forcePathStyle: true`). **The Indexer will still
+need**, when it's built: `@zilliz/milvus2-sdk-node` (Milvus), `@langchain/openai`
+(`OpenAIEmbeddings` against LM Studio's local server), `@langchain/community` (HTML cleaning),
+`@langchain/textsplitters` (`RecursiveCharacterTextSplitter`) — don't add these speculatively
+before actually building it. Full design:
+`docs/planning/03-crawler-scraper-indexing-plan.md`.
+
+**BullMQ semantics that shape the Scraper's retry logic**: a job processor's function runs once
+per *attempt*, not once per URL — the `'failed'` event fires on *every* failed attempt, not just
+the final one. `ProcessUrlService` is split into `handle()` (one attempt: fetch/save/publish, no
+counter/completion bookkeeping — this is `ProcessUrlWorker.process()`'s job) and `finalizeUrl()`
+(runs exactly once per URL, called from `ProcessUrlWorker`'s `@OnWorkerEvent('completed'/'failed')`
+handlers, which check `err instanceof UnrecoverableError || job.attemptsMade >= job.opts.attempts`
+to detect real finality — this is what makes `finalizeUrl` fire exactly once regardless of how many
+attempts a URL took). See `IProcessUrlUseCase`'s doc comment in
+`apps/scraper/src/application/interfaces/` for the full reasoning, and don't collapse this split
+"to simplify" without re-deriving why it's there.
 
 Path aliases for libs (`@app/auth-kernel`, etc.) are declared in root `tsconfig.json`'s `paths` —
 Nest's webpack build resolves them automatically, but **Jest does not** — both `jest.config.js` and

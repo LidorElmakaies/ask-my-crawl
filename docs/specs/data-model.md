@@ -149,10 +149,11 @@ CREATE INDEX ON notifications_log (user_id);
 
 ## Redis
 
-**Not implemented.** Per-job coordination state shared between the Scraper and the Indexer (dedup
-set, two pending-work counters, completion race guard), plus BullMQ's own internal queue keys for
-the `process-url`/`index-page` queues. Not a table of record for either service — see "Owned by the
-Scraper and the Indexer" above. Full key list in
+**Implemented** (the Scraper's side — `devops/redis`, one shared instance; the Indexer will reuse
+it once built, not provision its own). Per-job coordination state shared between the Scraper and
+the Indexer (dedup set, two pending-work counters, completion race guard), plus BullMQ's own
+internal queue keys for the `process-url`/`index-page` queues. Not a table of record for either
+service — see "Owned by the Scraper and the Indexer" above. Full key list in
 `docs/planning/03-crawler-scraper-indexing-plan.md`'s "Redis keys" table:
 
 | Key | Type | Purpose |
@@ -162,8 +163,13 @@ Scraper and the Indexer" above. Full key list in
 | `job:{job_id}:pending_index` | Int | completion tracking |
 | `job:{job_id}:succeeded` | Set | URLs that finished the full pipeline successfully |
 | `job:{job_id}:failed` | Set | URLs that terminally failed (scrape or index stage) |
-| `job:{job_id}:meta` | Hash | `user_id`, `query`, `base_url`, `base_domain`, `status`, `created_at` |
 | `job:{job_id}:notified` | flag | race guard, completion fires exactly once |
+
+No `job:{job_id}:meta` hash — `user_id`/`query`/`base_url` (the job's seed URL, from which
+`base_domain` is derived on demand) all ride on the `crawl-frontier` Kafka message itself instead,
+propagate-only fields set once by Job Manager Service's seed message and copied through unchanged
+by the Scraper on every child it re-publishes (see `event-schemas.md`'s `crawl-frontier` entry) —
+no separate Redis-stored copy needed.
 
 All job-scoped keys get a short cleanup TTL (e.g. 1 hour) once a job completes — no indefinite
 growth. No global cross-job cache.

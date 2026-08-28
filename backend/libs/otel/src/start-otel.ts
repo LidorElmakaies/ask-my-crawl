@@ -23,26 +23,50 @@
 // export failures) instead of leaving it completely silent — it does NOT add retry buffering or a
 // durable queue, so data during an outage is still lost, just no longer invisibly.
 
+import * as os from 'os';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
 import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
+import {
+  defaultResource,
+  resourceFromAttributes,
+} from '@opentelemetry/resources';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { NodeSDK } from '@opentelemetry/sdk-node';
-import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
+import {
+  ATTR_SERVICE_INSTANCE_ID,
+  ATTR_SERVICE_NAME,
+} from '@opentelemetry/semantic-conventions';
 
 /** Where the OTel Collector lives inside the compose network when nothing overrides it. */
 export const DEFAULT_OTLP_ENDPOINT = 'http://otel-collector:4317';
 
 let sdk: NodeSDK | undefined;
 let startedServiceName: string | undefined;
+let startedServiceInstanceId: string | undefined;
 
 /** The service name the running SDK was started with — used by OtelLogger for its logger scope. */
 export function getOtelServiceName(): string {
-  return startedServiceName ?? process.env.OTEL_SERVICE_NAME ?? 'unknown_service';
+  return (
+    startedServiceName ?? process.env.OTEL_SERVICE_NAME ?? 'unknown_service'
+  );
+}
+
+/**
+ * Disambiguates replicas of the same service (`docker compose up --scale <service>=N`, or any
+ * future horizontal scaling — the Scraper is the first service in this repo built to actually run
+ * more than one instance at once). `os.hostname()` inside a container is that container's own
+ * hostname, which Docker sets to the (short) container ID by default unless a compose service sets
+ * `hostname:` explicitly — unique per container, stable for that container's lifetime. Used for
+ * both `service.instance.id` (in every trace/metric) and every OtelLogger console/log line — with
+ * `process.pid`, every container's Node process is PID 1 (Dockerfiles use exec-form CMD), so PID
+ * alone can't tell two containers apart the way it would on a shared host.
+ */
+export function getOtelServiceInstanceId(): string {
+  return startedServiceInstanceId ?? os.hostname();
 }
 
 /**
@@ -65,9 +89,13 @@ export function startOtel(serviceName: string): void {
   diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.WARN);
 
   const url = process.env.OTEL_EXPORTER_OTLP_ENDPOINT ?? DEFAULT_OTLP_ENDPOINT;
+  const instanceId = os.hostname();
 
   const resource = defaultResource().merge(
-    resourceFromAttributes({ [ATTR_SERVICE_NAME]: serviceName }),
+    resourceFromAttributes({
+      [ATTR_SERVICE_NAME]: serviceName,
+      [ATTR_SERVICE_INSTANCE_ID]: instanceId,
+    }),
   );
 
   sdk = new NodeSDK({
@@ -94,10 +122,10 @@ export function startOtel(serviceName: string): void {
 
   sdk.start();
   startedServiceName = serviceName;
+  startedServiceInstanceId = instanceId;
 
-  // eslint-disable-next-line no-console
   console.log(
-    `[otel] started for service.name="${serviceName}", OTLP/gRPC endpoint ${url}`,
+    `[otel] started for service.name="${serviceName}", service.instance.id="${instanceId}", OTLP/gRPC endpoint ${url}`,
   );
 }
 
@@ -113,7 +141,6 @@ export async function shutdownOtel(): Promise<void> {
   try {
     await sdk?.shutdown();
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error('[otel] shutdown failed', err);
   }
 }

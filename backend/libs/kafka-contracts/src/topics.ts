@@ -9,14 +9,19 @@ export const KAFKA_TOPICS = {
   CRAWL_COMPLETE: 'crawl-complete',
   ANSWER_READY: 'answer-ready',
   RESULT_SAVED: 'result-saved',
+  // Scraper -> Indexer bridge, see docs/planning/03-crawler-scraper-indexing-plan.md.
+  PAGE_SCRAPED: 'page-scraped',
 } as const;
 
-// No consumer group constant for crawl-frontier/crawl-complete here — the service(s) that will
-// eventually consume/produce them are undecided (possibly split into separate crawler/scraper
-// services, see docs/planning/01-architecture-notes.md §4), so there's no name to commit to yet.
+// crawl-frontier/crawl-complete still have no consumer group constant here — the Scraper both
+// produces and consumes crawl-frontier (see SCRAPER below for its own consumer group), but
+// crawl-complete's producer is "whichever of Scraper/Indexer wins the completion race" (plan doc
+// §6), not a fixed consumer group of its own.
 export const KAFKA_CONSUMER_GROUPS = {
   JOB_MANAGER: 'job-manager',
   QUERY_ANSWER: 'query-answer',
   NOTIFICATION_SERVICE: 'notification-service',
   GATEWAY: 'gateway',
+  // The Scraper's Frontier Consumer (crawl-frontier) — per docs/specs/services.md.
+  SCRAPER: 'scraper',
 } as const;

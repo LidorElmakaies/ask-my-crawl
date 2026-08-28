@@ -29,3 +29,6 @@ npm-debug.log*
 # tests
 /coverage
 /.nyc_output
+
+# scripts/debug-crawl.ts's downloaded HTML output — local inspection only, never committed
+/debug-crawls

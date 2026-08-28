@@ -1,0 +1,25 @@
+services:
+  redis:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # One shared instance — backs BullMQ's `process-url`/`index-page` queues and every per-job
+    # coordination key (dedup set, pending counters, completion race guard — see
+    # docs/planning/03-crawler-scraper-indexing-plan.md). Shared by the Scraper today and the
+    # Indexer once it's built (never one instance per service) — per the "reuse existing shared
+    # infrastructure" non-negotiable in .claude/agents/devops.md.
+    #
+    # Pinned to 7.4-alpine, not `:latest` — same discipline as every other image in this file
+    # (Tempo's `:latest` incident in devops.md is the reason this is non-negotiable, not hygiene).
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - ../data/redis:/data
+    networks:
+      - askmycrawl
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

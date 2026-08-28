@@ -71,10 +71,13 @@ src/auth-proxy/`); Auth Service isn't reachable from the frontend directly, only
 
 ## Scraper
 
-**Not implemented.** Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. Two
-internal components, one Nest app — a single concern (fetching and BFS-expanding a job's pages)
-even though it's internally complex, per `backend-architecture.md`'s "single-concern vs.
-multi-concern" test:
+**Implemented** (`backend/apps/scraper`), 2026-08-28 — verified end-to-end against the live stack
+(a real crawl of `info.cern.ch`: 24 pages succeeded with real blobs in SeaweedFS, 1 permanent
+failure correctly classified with no wasted retries, a real `crawl-complete` summary published; a
+separate test confirmed the transient-failure path genuinely retries before giving up). Full
+mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. Two internal components, one Nest
+app — a single concern (fetching and BFS-expanding a job's pages) even though it's internally
+complex, per `backend-architecture.md`'s "single-concern vs. multi-concern" test:
 
 - **Frontier Consumer** — consumes every message on `crawl-frontier` (both the seed from Job
   Manager Service and every child URL the Scraper Worker re-publishes). Owns the per-job dedup gate

@@ -29,7 +29,7 @@ See `job-created` below for how the frontend eventually learns the real `job_id`
 
 ## `crawl-frontier`
 
-**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. The BFS work
+**Implemented.** Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. The BFS work
 queue for the Scraper service — both the initial seed URL and every subsequently-discovered URL on
 one topic (the seed producer and the Scraper both publish onto it).
 
@@ -51,13 +51,18 @@ one topic (the seed producer and the Scraper both publish onto it).
                                            // on the seed message and counts DOWN by 1 per hop; the
                                            // Scraper stops re-publishing once depth reaches 0
                                            // (see data-model.md)
-    "query": "the user's original question"
+    "query": "the user's original question",
+    "base_url": "https://example.com"     // the job's seed URL — equals `url` on the seed message
+                                           // itself, propagated through unchanged on every child
   }
   ```
-  `crawl-complete` (below) needs the job's query. Rather than have whatever consumes
-  `crawl-frontier` call Job Manager Service synchronously just to fetch it, the seed producer
-  (Job Manager Service) sets `query` once from the job row, and every re-produced child message
-  is expected to copy it through unchanged — a plain propagate-only field.
+  Both `query` and `base_url` are propagate-only fields: `crawl-complete` (below) needs the job's
+  query and its seed URL, and the Scraper needs the seed URL to enforce the same-domain link
+  filter against the site the job actually started at (not whichever page a link happened to be
+  found on). Rather than have whatever consumes `crawl-frontier` call Job Manager Service
+  synchronously just to fetch either, or store them separately in Redis, the seed producer (Job
+  Manager Service) sets both once (`base_url` equal to that same seed message's own `url`), and
+  every re-produced child message is expected to copy them through unchanged.
 
 ## `job-created`
 
@@ -89,14 +94,16 @@ real `job_id` that `POST /jobs` couldn't return synchronously, since Gateway nev
 
 ## `page-scraped`
 
-**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. It should fire
-from the Scraper Worker once a page's raw HTML is saved to SeaweedFS, and bridge into the Indexer's
-`index-page` BullMQ queue via its Index Intake Consumer (Kafka→BullMQ bridge, mirroring
-`crawl-frontier`→`process-url`).
+**Implemented** (the producing side — the Scraper). Full mechanism: `docs/planning/
+03-crawler-scraper-indexing-plan.md`. Fires from the Scraper Worker once a page's raw HTML is saved
+to SeaweedFS. The consuming side (the Indexer's Index Intake Consumer, bridging into its
+`index-page` BullMQ queue — Kafka→BullMQ bridge, mirroring `crawl-frontier`→`process-url`) is **not
+implemented** — the Indexer doesn't exist yet.
 
 - **Producers**: the Scraper's Scraper Worker(s)
-- **Consumers**: the Indexer's Index Intake Consumer, consumer group `indexer`
-- **Partition key**: not decided (deferred until this topic is actually wired up)
+- **Consumers**: the Indexer's Index Intake Consumer, consumer group `indexer` (not built yet)
+- **Partition key**: `url_hash` — decided 2026-08-28, spreads Indexer load evenly across
+  partitions; no per-job ordering is needed since each message indexes one independent page
 - **Value**:
   ```jsonc
   {
@@ -113,14 +120,16 @@ from the Scraper Worker once a page's raw HTML is saved to SeaweedFS, and bridge
 
 ## `crawl-complete`
 
-**Not implemented.** Design in `docs/planning/03-crawler-scraper-indexing-plan.md`. It should fire
-once a job's two Redis pending-work counters (`pending_scrape`, `pending_index`) both reach zero —
-a `SET NX` race guard ensures exactly one producer per job. The payload is a full result summary,
-so Query/Answer Service can act without a callback to fetch counts/URL lists separately.
+**Implemented** (the producing side — the Scraper, currently always the one to win the race since
+the Indexer doesn't exist yet). Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`.
+Fires once a job's two Redis pending-work counters (`pending_scrape`, `pending_index`) both reach
+zero — a `SET NX` race guard ensures exactly one producer per job. The payload is a full result
+summary, so Query/Answer Service can act without a callback to fetch counts/URL lists separately —
+verified live: a real crawl produced an accurate `succeeded_count`/`failed_count` split.
 
-- **Producers**: the Scraper's Scraper Worker **or** the Indexer's Indexing Worker — whichever
-  component's decrement observes both counters at zero and wins the race guard. Not always the same
-  service for every job.
+- **Producers**: the Scraper's Scraper Worker **or**, once built, the Indexer's Indexing Worker —
+  whichever component's decrement observes both counters at zero and wins the race guard. Not
+  always the same service for every job.
 - **Consumers**: Query/Answer Service, consumer group `query-answer` (not implemented — nothing
   consumes this topic today, but it must still exist since `auto.create.topics.enable=false`)
 - **Partition key**: `job_id`

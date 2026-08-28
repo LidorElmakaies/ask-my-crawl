@@ -19,6 +19,7 @@ jest.mock('@opentelemetry/api', () => ({
 
 jest.mock('./start-otel', () => ({
   getOtelServiceName: () => 'test-service',
+  getOtelServiceInstanceId: () => 'test-instance',
 }));
 
 // Imported after the mocks above so the module under test picks them up.
@@ -115,7 +116,10 @@ describe('OtelLogger', () => {
     const [emitted] = mockEmit.mock.calls[0];
     expect(emitted.attributes.trace_id).toBe('trace-abc');
     expect(emitted.attributes.span_id).toBe('span-123');
-    expect(JSON.parse(emitted.body)).toMatchObject({ trace_id: 'trace-abc', span_id: 'span-123' });
+    expect(JSON.parse(emitted.body)).toMatchObject({
+      trace_id: 'trace-abc',
+      span_id: 'span-123',
+    });
   });
 
   it('omits trace_id/span_id entirely when no span is active (bootstrap logs)', () => {

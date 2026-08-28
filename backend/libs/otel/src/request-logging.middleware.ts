@@ -11,7 +11,11 @@ import type { NextFunction, Request, Response } from 'express';
 import type { LoggerService } from '@nestjs/common';
 
 export function createRequestLoggingMiddleware(logger: LoggerService) {
-  return function requestLoggingMiddleware(req: Request, res: Response, next: NextFunction): void {
+  return function requestLoggingMiddleware(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
     const start = process.hrtime.bigint();
 
     res.on('finish', () => {

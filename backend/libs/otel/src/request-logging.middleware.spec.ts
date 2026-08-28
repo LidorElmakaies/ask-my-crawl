@@ -19,7 +19,9 @@ function makeRes(statusCode: number) {
 describe('createRequestLoggingMiddleware', () => {
   it('logs method, path, status, and a duration once the response finishes', () => {
     const logger = makeLogger();
-    const middleware = createRequestLoggingMiddleware(logger as unknown as LoggerService);
+    const middleware = createRequestLoggingMiddleware(
+      logger as unknown as LoggerService,
+    );
     const req = { method: 'POST', originalUrl: '/auth/register' } as any;
     const res = makeRes(201);
     const next = jest.fn();
@@ -30,13 +32,17 @@ describe('createRequestLoggingMiddleware', () => {
 
     res.fire();
     expect(logger.log).toHaveBeenCalledTimes(1);
-    expect(logger.log.mock.calls[0][0]).toMatch(/^POST \/auth\/register 201 \d+(\.\d+)?ms$/);
+    expect(logger.log.mock.calls[0][0]).toMatch(
+      /^POST \/auth\/register 201 \d+(\.\d+)?ms$/,
+    );
     expect(logger.log.mock.calls[0][1]).toBe('HTTP');
   });
 
   it('routes 5xx responses to error() instead of log()', () => {
     const logger = makeLogger();
-    const middleware = createRequestLoggingMiddleware(logger as unknown as LoggerService);
+    const middleware = createRequestLoggingMiddleware(
+      logger as unknown as LoggerService,
+    );
     const req = { method: 'GET', originalUrl: '/jobs' } as any;
     const res = makeRes(500);
 
@@ -49,8 +55,14 @@ describe('createRequestLoggingMiddleware', () => {
 
   it('does not log at all if the response never finishes', () => {
     const logger = makeLogger();
-    const middleware = createRequestLoggingMiddleware(logger as unknown as LoggerService);
-    middleware({ method: 'GET', originalUrl: '/x' } as any, makeRes(200) as any, jest.fn());
+    const middleware = createRequestLoggingMiddleware(
+      logger as unknown as LoggerService,
+    );
+    middleware(
+      { method: 'GET', originalUrl: '/x' } as any,
+      makeRes(200) as any,
+      jest.fn(),
+    );
 
     expect(logger.log).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();

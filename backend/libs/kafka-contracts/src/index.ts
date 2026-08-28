@@ -8,3 +8,4 @@ export * from './job-created-message';
 export * from './crawl-complete-message';
 export * from './answer-ready-message';
 export * from './result-saved-message';
+export * from './page-scraped-message';

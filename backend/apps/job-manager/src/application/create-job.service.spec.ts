@@ -73,6 +73,7 @@ describe('CreateJobService', () => {
         url: job.url,
         depth: MAX_CRAWL_DEPTH,
         query: job.query,
+        base_url: job.url,
       },
     );
   });

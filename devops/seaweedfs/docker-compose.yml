@@ -1,0 +1,87 @@
+services:
+  seaweedfs:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # Single filer+volume node running SeaweedFS's combined `server` mode (master+volume+filer in
+    # one process, S3 gateway enabled via -s3) — not the project's own 6-service master/volume/
+    # filer/s3/webdav/prometheus topology (github.com/seaweedfs/seaweedfs/blob/master/docker/
+    # seaweedfs-compose.yml), which is overkill for this dev-phase single-node setup. Matches this
+    # repo's existing "single Postgres instance"/"single Kafka broker" minimalism.
+    #
+    # Pinned to 4.44 — the latest stable tag confirmed directly against Docker Hub at the time this
+    # was written (never `:latest`, same discipline as every other image in this file — see the
+    # Tempo incident in devops.md for why that's non-negotiable, not hygiene).
+    image: chrislusf/seaweedfs:4.44
+    # Sources SEAWEEDFS_ACCESS_KEY/SEAWEEDFS_SECRET_KEY — same file the Scraper's own S3 client
+    # reads, so both sides always agree on the same credentials with no duplicated values across
+    # devops/.env and backend/.env.
+    env_file:
+      - ../../backend/.env
+    # The S3 identity config (accessKey/secretKey) is generated into the container at startup from
+    # env vars, never committed as a file with real secrets baked in (devops.md's "config via
+    # environment variables only" non-negotiable) — same reasoning as every other secret in this
+    # project, just expressed as a generated file here instead of a plain env var, since that's the
+    # shape SeaweedFS's own `-s3.config` flag expects (github.com/seaweedfs/seaweedfs/wiki/
+    # S3-Credentials). `Admin` action is broad but this is a single-tenant internal service with one
+    # identity — no per-bucket scoping need yet.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      # Built with `printf`'s `\n` escapes, not a heredoc — YAML's folded `>-` block style (and
+      # Compose re-serializing this string) collapses single newlines into spaces, so a heredoc's
+      # closing `EOF` marker never lands on its own line. `printf`'s `\n` escapes survive that
+      # folding intact since they're not real newlines until `printf` itself interprets them.
+      - >-
+        set -e &&
+        printf '{\n  "identities": [\n    {\n      "name": "askmycrawl",\n      "credentials": [{"accessKey": "%s", "secretKey": "%s"}],\n      "actions": ["Admin", "Read", "Write", "List", "Tagging"]\n    }\n  ]\n}\n'
+        "$$SEAWEEDFS_ACCESS_KEY" "$$SEAWEEDFS_SECRET_KEY" > /tmp/s3.json &&
+        weed server -dir=/data -ip.bind=0.0.0.0 -master.volumeSizeLimitMB=1024
+        -s3 -s3.port=8333 -s3.config=/tmp/s3.json
+    ports:
+      - "8333:8333" # S3 API — host debugging only (aws s3 --endpoint-url http://localhost:8333 ...); in-network services use seaweedfs:8333
+      - "9333:9333" # master UI/API — host debugging only
+      - "8888:8888" # filer — host debugging only
+    volumes:
+      - ../data/seaweedfs:/data
+    networks:
+      - askmycrawl
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  seaweedfs-init:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    # One-off: creates the raw-HTML bucket explicitly (aws s3 mb), then exits — same
+    # explicit-not-implicit discipline as kafka-init's topic creation (devops/kafka/
+    # docker-compose.yml), not relying on the Scraper's first PutObject to implicitly create it.
+    # Pinned image, per this file's own standing rule.
+    image: amazon/aws-cli:2.36.23
+    restart: "no"
+    # env_file only injects these as container-runtime env vars, not into Compose's own `${...}`
+    # interpolation (that's resolved from devops/.env / the shell at compose-parse time, before any
+    # container starts) — so the AWS_* rename and the bucket name below happen inside the shell
+    # command via `$$`-escaped runtime expansion, not a Compose-level `environment:` mapping (a
+    # plain `environment: [AWS_ACCESS_KEY_ID=${SEAWEEDFS_ACCESS_KEY}]` here would resolve to an
+    # empty string, since that var lives in backend/.env, not devops/.env).
+    env_file:
+      - ../../backend/.env
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    networks:
+      - askmycrawl
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -e &&
+        export AWS_ACCESS_KEY_ID="$$SEAWEEDFS_ACCESS_KEY" &&
+        export AWS_SECRET_ACCESS_KEY="$$SEAWEEDFS_SECRET_KEY" &&
+        (aws --endpoint-url http://seaweedfs:8333 s3 mb "s3://$${SEAWEEDFS_BUCKET:-askmycrawl-raw-html}" || true) &&
+        aws --endpoint-url http://seaweedfs:8333 s3 ls

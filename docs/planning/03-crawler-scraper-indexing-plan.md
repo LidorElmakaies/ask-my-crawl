@@ -7,11 +7,15 @@
 > decisions closed out directly with the user on 2026-08-28. Referenced from
 > [`01-architecture-notes.md` §5](01-architecture-notes.md).
 >
-> **Build scope for the current pass: Scraper only** (§1–§6 below). The Indexer (§7) is documented
-> here in full because it's the other half of the shared Redis/completion-detection design and
-> every other spec already points at this file for it too — but it is **not being implemented
-> right now**. Don't start Indexer code from this doc without confirming scope has actually
-> expanded.
+> **Build scope for this pass was Scraper only** (§1–§6 below) — **implemented and verified
+> 2026-08-28** (`backend/apps/scraper`): a real crawl of `info.cern.ch` produced 24 succeeded pages
+> (real blobs in SeaweedFS, real `page-scraped` messages), 1 correctly-classified permanent failure
+> (404, no wasted retries), and a real `crawl-complete` summary; a separate test against an
+> unreachable host confirmed the transient-failure path genuinely retries
+> `SCRAPER_FETCH_MAX_ATTEMPTS` times before giving up. The Indexer (§7) is documented here in full
+> because it's the other half of the shared Redis/completion-detection design and every other spec
+> already points at this file for it too — but it is **still not implemented**. Don't start Indexer
+> code from this doc without confirming scope has actually expanded.
 
 ## 1. Shape
 
@@ -77,14 +81,22 @@ function sameDomain(a: string, b: string): boolean {
 }
 ```
 
-Compared against the seed URL's hostname (`job:{job_id}:meta`'s `base_domain`, see §5) — not the
-immediately-referring page's hostname, so the crawl can't domain-hop through a same-domain chain
-onto somewhere the seed never pointed to it either way.
+Compared against the seed URL's hostname, not the immediately-referring page's hostname, so the
+crawl can't domain-hop through a same-domain chain onto somewhere the seed never pointed to it
+either way. The seed's hostname is derived from `base_url`, a field on the `crawl-frontier` message
+itself (§4) — not a separate Redis-stored copy.
 
 ## 4. Frontier Consumer
 
 API layer, `@EventPattern('crawl-frontier')`, consumer group `scraper`. Consumes every message —
 both the seed (Job Manager Service) and every child URL a Scraper Worker re-publishes.
+
+**`base_url` is a propagate-only field on the message itself** — same pattern `query` already uses.
+Job Manager Service sets it once on the seed `crawl-frontier` message, equal to that same message's
+own `url` (the seed's own URL *is* the job's base URL). Every child message the Scraper Worker
+re-publishes copies it through unchanged. Whatever needs the job's seed URL later (the same-domain
+filter in §5c, the `crawl-complete` payload in §6) reads it straight off the message it's already
+holding — no separate Redis-stored job-meta hash, no synchronous call back to Job Manager Service.
 
 1. `stripFragment(url)`.
 2. `SADD crawl:{job_id}:visited <url>` — Redis `SADD` returns whether the member was newly added;
@@ -92,7 +104,7 @@ both the seed (Job Manager Service) and every child URL a Scraper Worker re-publ
    no further action — this makes redelivery of the same message (Kafka at-least-once, a retry,
    whatever) harmless.
 3. If newly added: `INCR job:{job_id}:pending_scrape`, then enqueue onto `process-url` (BullMQ)
-   with `{job_id, user_id, url, depth, query}`.
+   with `{job_id, user_id, url, depth, query, base_url}`.
 
 This consumer does no fetching and no domain filtering — same-domain/depth filtering already
 happened upstream (Scraper Worker only re-publishes URLs that already passed both checks), so
@@ -141,8 +153,9 @@ use case; the steps below are that use case's logic.
       i.e. don't bother producing children once the next hop would already be past the budget —
       children are re-published at `depth - 1`.
    d. For each surviving child link: publish `crawl-frontier` (`{job_id, user_id, url: child,
-      depth: depth - 1, query}`, partition key `url_hash` per `event-schemas.md`). No dedup check
-      here — that's Frontier Consumer's job (§4) when it consumes this same message back.
+      depth: depth - 1, query, base_url}` — `base_url` copied through unchanged, see §4, partition
+      key `url_hash` per `event-schemas.md`). No dedup check here — that's Frontier Consumer's job
+      (§4) when it consumes this same message back.
    e. Publish `page-scraped` (`{job_id, user_id, url, normalizedUrl: stripFragment(url), blobKey,
       depth, scrapedAt, query}`, partition key `url_hash` — decided 2026-08-28, spreads Indexer
       load evenly across partitions; no per-job ordering is needed since each message indexes one
@@ -175,7 +188,7 @@ The winner reads `job:{job_id}:succeeded`/`:failed` (Sets) to build the full pay
   "job_id": "uuid",
   "user_id": "uuid",
   "query": "...",
-  "url": "...",              // base_url, from job:{job_id}:meta
+  "url": "...",              // base_url, straight off the message that triggered this call
   "succeeded_count": 12,
   "failed_count": 1,
   "succeeded_urls": ["..."],
@@ -239,9 +252,10 @@ without them:
 
 ## 10. Open items carried forward (not blocking, not decided here)
 
-- Exact BullMQ backoff base delay (proposed 5s above, not explicitly confirmed — cheap to change,
-  not wired to an env var since only the attempt count was asked to be configurable).
-- `handleUnsupportedContentType`'s real behavior (§5 step 5) — deliberately left a stub.
-- Per-domain rate limiting — still an intentionally-unimplemented stub hook, per `docs/specs/
-  README.md`.
-- Redis TTL's exact value (~1 hour, illustrative in `data-model.md`, not reconfirmed here).
+- Exact BullMQ backoff base delay (implemented as proposed: 5s, exponential — cheap to change, not
+  wired to an env var since only the attempt count was asked to be configurable).
+- `handleUnsupportedContentType`'s real behavior (§5 step 5) — implemented as a deliberate stub,
+  throws `PermanentFetchError('... not implemented')`. Still not decided what it should actually do.
+- Per-domain rate limiting — not implemented, not even a stub/interface. Still open, deferred.
+- Redis TTL's exact value — implemented as 60 minutes (`JOB_KEY_TTL_SECONDS`,
+  `backend/apps/scraper/src/models/constants.ts`), matching `data-model.md`'s "~1 hour" language.

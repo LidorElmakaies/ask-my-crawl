@@ -10,13 +10,15 @@
 # per-service via `extends:` — not YAML anchors, which only resolve within a single YAML document and
 # can't cross the per-service files below.
 #
-# `postgres`, `gateway`, `auth`, `frontend`, and `kafka` (broker + topic init + UI) exist today — see
-# docs/specs/services.md for the remaining five backend services. Add each one here (its own
-# Dockerfile under backend/apps/<service>/, its own devops/<service>/docker-compose.yml, its own
-# `include:` line below) as it gets built, along with redis once something actually depends on it —
-# see the `devops` agent (.claude/agents/devops.md) for the full target shape. No service
-# produces/consumes Kafka messages yet (Crawl Worker, the first consumer, isn't built) — Kafka just
-# stands ready ahead of that.
+# `postgres`, `gateway`, `auth`, `job-manager`, `frontend`, `kafka` (broker + topic init + UI),
+# `redis`, and `seaweedfs` exist today — see docs/specs/services.md for the remaining three backend
+# services (Indexer, Query/Answer, Notification). Add each one here (its own Dockerfile under
+# backend/apps/<service>/, its own devops/<service>/docker-compose.yml, its own `include:` line
+# below) as it gets built — see the `devops` agent (.claude/agents/devops.md) for the full target
+# shape, including its "reuse existing shared infrastructure" rule (a new service points at an
+# existing Redis/SeaweedFS/Postgres/Kafka instance, it doesn't get its own). Job Manager Service
+# (2026-08-28) is Kafka's first real producer/consumer; the Scraper (2026-08-28,
+# docs/planning/03-crawler-scraper-indexing-plan.md) is Redis/SeaweedFS's first.
 
 include:
   - path: postgres/docker-compose.yml
@@ -25,6 +27,9 @@ include:
   - path: job-manager/docker-compose.yml
   - path: frontend/docker-compose.yml
   - path: kafka/docker-compose.yml
+  - path: redis/docker-compose.yml
+  - path: seaweedfs/docker-compose.yml
+  - path: scraper/docker-compose.yml
 
 networks:
   askmycrawl:            # internal service-to-service (Postgres, and the services themselves)

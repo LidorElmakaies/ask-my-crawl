@@ -27,12 +27,16 @@ export class CreateJobService implements ICreateJobUseCase {
     });
 
     // Seed the crawl BFS before announcing job_id — services.md's stated publish order.
+    // base_url == url on the seed message — the Scraper copies it through unchanged on every
+    // child it re-publishes (same propagate-only pattern as query), so it never needs to be
+    // fetched again after this one message. See crawl-frontier-message.ts's own doc comment.
     const crawlFrontierMessage: CrawlFrontierMessage = {
       job_id: job.id,
       user_id: job.user_id,
       url: job.url,
       depth: MAX_CRAWL_DEPTH,
       query: job.query,
+      base_url: job.url,
     };
     await this.eventPublisher.publish(
       KAFKA_TOPICS.CRAWL_FRONTIER,
