@@ -2,7 +2,8 @@
 
 Single Postgres instance for the project's scale. Tables are grouped by **owning service** below —
 even sharing one physical database, only the owning service should write to its tables directly;
-other services go through that service's API/events.
+other services go through that service's API/events. This is a standing rule for shared
+infrastructure generally, not just Postgres — see the `devops` agent's "Non-negotiables".
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()

@@ -22,6 +22,7 @@ include:
   - path: postgres/docker-compose.yml
   - path: gateway/docker-compose.yml
   - path: auth/docker-compose.yml
+  - path: job-manager/docker-compose.yml
   - path: frontend/docker-compose.yml
   - path: kafka/docker-compose.yml
 

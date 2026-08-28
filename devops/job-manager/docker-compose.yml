@@ -1,11 +1,11 @@
 services:
-  auth:
+  job-manager:
     extends:
       file: ../common.yml
       service: _defaults
     build:
       context: ../../backend
-      dockerfile: apps/auth/Dockerfile
+      dockerfile: apps/job-manager/Dockerfile
     env_file:
       - ../../backend/.env
     environment:
@@ -14,11 +14,14 @@ services:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl
       # OpenTelemetry — service.name must be unique per service; the collector lives on the
       # shared `observability` network (see the root docker-compose.yml's networks: block).
-      - OTEL_SERVICE_NAME=auth
+      - OTEL_SERVICE_NAME=job-manager
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-    ports:
-      - "8001:8001"
+    # No ports: — Kafka-only microservice, no HTTP surface. Nothing calls it directly; Gateway's
+    # read path for GET /jobs* isn't implemented yet (see docs/specs/services.md), and even once it
+    # is, cross-service traffic stays on the shared `askmycrawl` network, not a published host port.
     depends_on:
+      kafka:
+        condition: service_healthy
       postgres:
         condition: service_healthy
     networks:

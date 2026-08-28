@@ -64,13 +64,14 @@ services:
     # kafka-topics.sh would otherwise race the broker's own startup. `restart: "no"` overrides the
     # shared default below — this is a one-off job, not a long-running service.
     #
-    # Deliberately empty right now — no topic-creation lines below. Decided (2026-08-20): topics get
-    # added here one at a time, alongside whichever piece of the pipeline actually produces/consumes
-    # each one, not all five up front — e.g. add `crawl-frontier` when Crawl Result Manager/Crawl
-    # Worker's produce/consume path is being built and verified, not before. Until the first topic is
-    # added, this just proves connectivity (`--list` against an empty cluster) — kept in the compose
-    # file rather than removed so there's nowhere new to wire up when the first topic lands, just a
-    # line to add here.
+    # Topics get added here one at a time, alongside whichever piece of the pipeline actually
+    # produces/consumes each one (decided 2026-08-20) — not all seven up front. Job Manager Service
+    # (2026-08-28) touches five of the seven: `job-requests`/`crawl-frontier`/`job-created` it
+    # produces, `answer-ready` it consumes (created anyway even though nothing produces it yet —
+    # Query/Answer Service isn't built — since `auto.create.topics.enable=false` means a consumer
+    # against a missing topic just fails), `result-saved` it produces. `crawl-complete`/`page-scraped`
+    # stay out — those belong to the Scraper/Indexer, not yet built. All five replication-factor 1
+    # (single broker) and `retention.ms=86400000` (1 day), matching event-schemas.md's table exactly.
     image: apache/kafka:4.3.1
     restart: "no"
     depends_on:
@@ -82,8 +83,17 @@ services:
     command:
       - >-
         set -e &&
-        echo '--- no topics defined yet; add kafka-topics.sh --create lines here as each is needed (see docs/specs/event-schemas.md) ---' &&
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --list
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic job-requests --partitions 3 --replication-factor 1 --config retention.ms=86400000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic crawl-frontier --partitions 6 --replication-factor 1 --config retention.ms=86400000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic job-created --partitions 3 --replication-factor 1 --config retention.ms=86400000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic answer-ready --partitions 3 --replication-factor 1 --config retention.ms=86400000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --create --if-not-exists
+        --topic result-saved --partitions 3 --replication-factor 1 --config retention.ms=86400000 &&
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --describe
 
   kafka-ui:
     extends:

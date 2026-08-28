@@ -19,13 +19,13 @@ working this repo with agentic teams: `.claude/agents/{backend,frontend,devops,t
 ## Repo layout
 
 ```
-backend/                 NestJS monorepo — apps/ (gateway, auth; five more services planned, see
-                          docs/specs/services.md) + libs/ (auth-kernel, dtos, kafka-contracts,
-                          otel — shared code between apps)
+backend/                 NestJS monorepo — apps/ (gateway, auth, job-manager; four more services
+                          planned, see docs/specs/services.md) + libs/ (auth-kernel, dtos,
+                          kafka-contracts, otel — shared code between apps)
 frontend/                 Expo / React Native app — see frontend/CLAUDE.md for details
 devops/                   docker-compose.yml (app stack) + observability/ (Grafana/Loki/
                           Prometheus/Tempo/OTel — joined to the app stack via a shared Docker
-                          network; gateway/auth send real traces/logs/metrics here, see
+                          network; gateway/auth/job-manager send real traces/logs/metrics here, see
                           backend/libs/otel)
 docs/specs/               Formal specs — source of truth for how the system is supposed to work
 docs/planning/            Raw decision log — why things are the way they are
@@ -46,15 +46,19 @@ docs/planning/            Raw decision log — why things are the way they are
   directly, only the Gateway** (a hard project rule, not just current wiring; see the `devops`
   agent). A request crossing the Gateway→Auth Service hop produces one connected distributed trace,
   not two disconnected ones (`backend/libs/otel`).
+- **Job Manager Service** (`backend/apps/job-manager`) — Kafka-only microservice (no HTTP surface),
+  consumes `job-requests`/`answer-ready`, produces the `crawl-frontier` seed/`job-created`/
+  `result-saved`, owns the `jobs` table. Runs on the shared `askmycrawl` Postgres database (same
+  physical instance Auth Service uses — see `docs/specs/data-model.md`).
 - **Not implemented**: **Scraper** and **Indexer** (the crawl/scrape/index pipeline — design in
-  `docs/planning/03-crawler-scraper-indexing-plan.md`), Query/Answer Service, Notification Service,
-  Job Manager Service. `backend/libs/kafka-contracts` (topic names + typed Kafka payloads matching
-  `docs/specs/event-schemas.md`) and the `kafka` broker/topic-init in
-  `devops/kafka/docker-compose.yml` exist; nothing currently produces or consumes
-  `crawl-frontier`/`crawl-complete`, and `crawl-complete-message.ts`'s shape is stale against
-  `docs/specs/event-schemas.md` (needs a `page-scraped-message.ts` added too) — see the `backend`
-  agent. Redis, SeaweedFS, and Milvus are part of this pipeline's design but have no `devops/`
-  service definitions yet either — see the `devops` agent.
+  `docs/planning/03-crawler-scraper-indexing-plan.md`), Query/Answer Service, Notification Service.
+  `backend/libs/kafka-contracts` (topic names + typed Kafka payloads matching
+  `docs/specs/event-schemas.md`) exists and is now imported by Job Manager Service; the
+  `crawl-complete`/`page-scraped` topics still have no producer/consumer, and
+  `crawl-complete-message.ts`'s shape is stale against `docs/specs/event-schemas.md` (needs a
+  `page-scraped-message.ts` added too) — see the `backend` agent. Redis, SeaweedFS, and Milvus are
+  part of this pipeline's design but have no `devops/` service definitions yet either — see the
+  `devops` agent.
 
 ## Commands
 
@@ -78,10 +82,11 @@ npx expo start --web
 
 **Easiest way to run the whole backend + web frontend together**: Docker Compose. **Observability
 must come up first** — `devops/docker-compose.yml` references `devops/observability`'s Docker
-network as `external: true`, so `gateway`/`auth` fail to start without it already existing:
+network as `external: true`, so the whole `devops/` compose project (`gateway`/`auth`/`job-manager`/
+everything) fails to start without it already existing:
 ```bash
 cd devops/observability && docker compose --env-file ../.env up -d   # Grafana (via Gateway's /admin/grafana, no direct port), Loki, Prometheus, Tempo, OTel Collector
-cd .. && docker compose up -d --build                                # postgres, gateway (:8000), auth (:8001), frontend (:8081), kafka (:9092)
+cd .. && docker compose up -d --build                                # postgres, gateway (:8000), auth (:8001), job-manager, frontend (:8081), kafka (:9092)
 ```
 `devops/.env` (copy from `devops/.env.example`) holds `PUBLIC_ORIGIN` — the single source of truth
 for the deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and the frontend build.
@@ -89,9 +94,11 @@ for the deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and t
 command needs the explicit `--env-file ../.env` flag to share that same file; `devops/`'s own
 command picks it up automatically since Compose reads `.env` from the directory it's invoked from.
 `kafka` brings up a single-broker KRaft (no Zookeeper) instance plus a one-off `kafka-init` service
-that creates two real topics (`crawl-frontier`, `crawl-complete` — matching
-`docs/specs/event-schemas.md`'s partition/retention table), then exits — see the `devops` agent for
-image/version and listener layout; nothing currently produces or consumes either topic. No `redis`
+that creates the five topics Job Manager Service touches (`job-requests`/`crawl-frontier`/
+`job-created`/`answer-ready`/`result-saved` — matching `docs/specs/event-schemas.md`'s
+partition/retention table), then exits — see the `devops` agent for image/version and listener
+layout; `crawl-complete`/`page-scraped` aren't created yet, they belong to the not-yet-built
+Scraper/Indexer. No `redis`
 service exists — nothing currently needs it. `devops/` has no Makefile (removed deliberately —
 `make` isn't installed on this dev machine, see the `devops` agent) — the two-command sequence
 above, in that order, is the only way to bring it up. Android/iOS still run via `npx expo start`
@@ -128,11 +135,13 @@ before touching any of it; provider order in `app/_layout.js` is load-bearing an
 reordered.
 
 **Observability** — `devops/observability/`: app → OTLP/gRPC → Collector → fans out to Loki (logs),
-Prometheus (metrics), Tempo (traces), all viewable in Grafana. `gateway`/`auth` both send real
-telemetry via the shared `backend/libs/otel` lib (traces + metrics + logs + a per-request log line
-via `createRequestLoggingMiddleware`): a real request produces a root-span trace in Tempo with real
-child spans (HTTP/pg/etc. auto-instrumentation), a log line in Loki correlated to it by `trace_id`,
-and per-route/per-status metrics in Prometheus.
+Prometheus (metrics), Tempo (traces), all viewable in Grafana. `gateway`/`auth`/`job-manager` all
+send real telemetry via the shared `backend/libs/otel` lib. `gateway`/`auth` get a per-request log
+line via `createRequestLoggingMiddleware` (HTTP-specific); `job-manager` has no HTTP surface, so its
+per-message activity shows up as Kafka spans instead (`@opentelemetry/instrumentation-kafkajs`,
+auto-included — confirmed live, not assumed) — a real request/message produces a root-span trace in
+Tempo with real child spans (HTTP/pg/kafka auto-instrumentation), a log line in Loki correlated to
+it by `trace_id`, and per-route-or-topic/per-status metrics in Prometheus.
 Two things worth knowing before touching this: (1) if the collector isn't reachable when an app
 boots, telemetry export just fails — `start-otel.ts` logs that failure via `diag`, but there's no
 retry buffer, so an outage means real data loss for its duration, not just a delay; (2) apps build

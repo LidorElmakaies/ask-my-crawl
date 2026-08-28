@@ -1,7 +1,7 @@
 // OTel first — before ANY other import. The auto-instrumentations patch `require()`, so they only
 // see http/express/pg if they're installed before those modules load. Do not move, reorder, or let
 // a formatter/lint autofix sort these two lines below the imports underneath them.
-import { shutdownOtel, startOtel } from '@app/otel';
+import { OtelLogger, shutdownOtel, startOtel } from '@app/otel';
 startOtel('job-manager');
 
 import { NestFactory } from '@nestjs/core';
@@ -30,6 +30,11 @@ async function bootstrap() {
       },
     },
   );
+
+  // Without this, nothing (not even bootstrap chatter) reaches Loki — same gap @app/otel's
+  // OtelLogger doc warns about, same fix as gateway/auth's main.ts.
+  const logger = new OtelLogger('job-manager');
+  app.useLogger(logger);
 
   // Node as PID 1 in the container gets SIGTERM directly from `docker stop`, but does nothing
   // with it by default — the process just sits there until Docker's grace period expires and

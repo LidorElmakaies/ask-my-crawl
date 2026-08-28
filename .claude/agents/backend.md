@@ -120,7 +120,9 @@ is built on. Key points to keep front of mind while coding (full detail in the s
 
 - **Never cross service data ownership.** If you're in one service and need another service's
   data, call that service — don't reach into its Postgres tables directly, even though it's the
-  same physical database for now.
+  same physical database for now (one shared instance for every service that owns tables — reused,
+  not reprovisioned, per new service; same standing rule for any other shared infra a service needs,
+  see the `devops` agent's "Non-negotiables").
 - **Password hashing is `SHA256(PEPPER + salt + password)`**, per `auth.md`, implemented as an
   Infrastructure adapter (`SaltPepperSha256Hasher`, in `apps/auth`) behind `IPasswordHasher` — never
   inline `crypto.createHash` in a controller or service class.
