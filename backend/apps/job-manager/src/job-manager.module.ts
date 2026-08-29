@@ -3,7 +3,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnswerReadyConsumer } from './api/consumers/answer-ready.consumer';
 import { JobRequestsConsumer } from './api/consumers/job-requests.consumer';
+import { JobsController } from './api/controllers/jobs.controller';
 import { CreateJobService } from './application/create-job.service';
+import { GetJobsService } from './application/get-jobs.service';
 import { SaveJobResultService } from './application/save-job-result.service';
 import { KafkajsEventPublisher } from './infrastructure/kafka/kafkajs-event-publisher';
 import { JobEntity } from './infrastructure/postgres/entities/job.entity';
@@ -11,6 +13,7 @@ import { TypeOrmJobRepository } from './infrastructure/postgres/typeorm-job.repo
 import {
   CREATE_JOB_USE_CASE,
   EVENT_PUBLISHER,
+  GET_JOBS_USE_CASE,
   JOB_REPOSITORY,
   SAVE_JOB_RESULT_USE_CASE,
 } from './tokens';
@@ -33,12 +36,14 @@ import {
     }),
     TypeOrmModule.forFeature([JobEntity]),
   ],
-  controllers: [JobRequestsConsumer, AnswerReadyConsumer],
+  controllers: [JobRequestsConsumer, AnswerReadyConsumer, JobsController],
   providers: [
     { provide: CREATE_JOB_USE_CASE, useClass: CreateJobService },
     { provide: SAVE_JOB_RESULT_USE_CASE, useClass: SaveJobResultService },
+    { provide: GET_JOBS_USE_CASE, useClass: GetJobsService },
     { provide: JOB_REPOSITORY, useClass: TypeOrmJobRepository },
     { provide: EVENT_PUBLISHER, useClass: KafkajsEventPublisher },
   ],
 })
 export class JobManagerModule {}
+

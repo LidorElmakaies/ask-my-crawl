@@ -10,7 +10,9 @@ import {
 startOtel('gateway');
 
 import { NestFactory } from '@nestjs/core';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import { KAFKA_CONSUMER_GROUPS } from '@app/kafka-contracts';
 import { GatewayModule } from './gateway.module';
 
 async function bootstrap() {
@@ -26,7 +28,23 @@ async function bootstrap() {
   app.enableCors({ origin: true });
   app.useWebSocketAdapter(new IoAdapter(app));
 
+  // Connect Kafka microservice for consuming job-created and result-saved events
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        clientId: 'gateway',
+        brokers: (process.env.KAFKA_BROKERS ?? 'kafka:19092').split(','),
+      },
+      consumer: {
+        groupId: KAFKA_CONSUMER_GROUPS.GATEWAY,
+      },
+    },
+  });
+
   installGracefulShutdown(app);
+
+  await app.startAllMicroservices();
 
   const port = process.env.PORT ?? 8000;
   await app.listen(port);
@@ -36,3 +54,4 @@ async function bootstrap() {
   );
 }
 void bootstrap();
+

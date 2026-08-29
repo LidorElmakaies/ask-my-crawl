@@ -14,6 +14,12 @@ export const CONNECTION_STORE = Symbol('IConnectionStore');
 export const AUTH_PROXY_SERVICE = Symbol('IAuthProxyService');
 export const AUTH_SERVICE_CLIENT = Symbol('IAuthServiceClient');
 
+// jobs-proxy/
+export const JOBS_PROXY_SERVICE = Symbol('IJobsProxyService');
+export const JOB_SERVICE_CLIENT = Symbol('IJobServiceClient');
+export const JOB_REQUESTS_PUBLISHER = Symbol('IJobRequestsPublisher');
+
 // tool-proxy/ — no tokens of its own. AdminAuthGateMiddleware depends directly on
 // AUTH_TOKEN_SERVICE (@app/auth-kernel); there's no new business logic here to put behind an
 // interface (see tool-proxy.module.ts's header comment).
+
