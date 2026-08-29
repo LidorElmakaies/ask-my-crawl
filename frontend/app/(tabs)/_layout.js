@@ -16,9 +16,11 @@ import { dark as darkColors, light as lightColors } from '../../src/theme/colors
 const TABS = [
   { name: 'index',    label: 'Home',     icon: 'home',        iconActive: 'home' },
   { name: 'scraper',  label: 'Scraper',  icon: 'search-outline', iconActive: 'search' },
+  { name: 'history',  label: 'History',  icon: 'time-outline',   iconActive: 'time' },
   { name: 'settings', label: 'Settings', icon: 'settings-outline', iconActive: 'settings' },
   { name: 'admin',    label: 'Admin',    icon: 'shield-outline', iconActive: 'shield', adminOnly: true },
 ];
+
 
 function CustomTabBar({ navigation, state }) {
   const { colors } = useAppTheme();
@@ -100,6 +102,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="scraper" />
+      <Tabs.Screen name="history" />
       <Tabs.Screen name="settings" />
       {/* href: null hides the tab from Expo Router's own default tab bar / <Link> resolution for
           non-admins (https://docs.expo.dev/router/advanced/tabs/) — belt-and-suspenders alongside
@@ -108,6 +111,7 @@ export default function TabsLayout() {
           boundary is app/(tabs)/admin/_layout.js's redirect plus the backend's own role guard. */}
       <Tabs.Screen name="admin" options={{ href: role === 'admin' ? undefined : null }} />
     </Tabs>
+
   );
 }
 

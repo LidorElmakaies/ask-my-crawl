@@ -33,4 +33,8 @@ export const URLS = {
     grafana: `${BASE_URL}/admin/grafana/`,
     kafkaUi: `${BASE_URL}/admin/kafka-ui/`,
   },
+  jobs: {
+    list: `${BASE_URL}/jobs`,
+  },
 };
+

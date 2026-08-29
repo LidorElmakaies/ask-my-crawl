@@ -8,34 +8,45 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../src/components/GlowCard';
 import GradientButton from '../../src/components/GradientButton';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
-import { clearScraper, submitScrapeRequest } from '../../src/store/slices/scraperSlice';
+import { clearJobsError, submitJobRequest } from '../../src/store/slices/jobsSlice';
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [queryFocused, setQueryFocused] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const router = useRouter();
   const dispatch = useDispatch();
-  const { status, result, error } = useSelector((state) => state.scraper);
+  const { submitStatus, submitError } = useSelector((state) => state.jobs);
   const { colors } = useAppTheme();
 
   const canSubmit = !!input.trim() && !!query.trim();
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) return;
-    dispatch(submitScrapeRequest({ url: input.trim(), query: query.trim() }));
+    setSubmitted(false);
+    const action = await dispatch(
+      submitJobRequest({ url: input.trim(), query: query.trim() }),
+    );
+    if (submitJobRequest.fulfilled.match(action)) {
+      setSubmitted(true);
+    }
   };
 
   const handleClear = () => {
     setInput('');
     setQuery('');
-    dispatch(clearScraper());
+    setSubmitted(false);
+    dispatch(clearJobsError());
   };
+
 
   return (
     <SpaceBackground>
@@ -109,14 +120,14 @@ export default function ScraperScreen() {
           <GradientButton
             label="Send Request"
             onPress={handleSubmit}
-            loading={status === 'loading'}
+            loading={submitStatus === 'loading'}
             disabled={!canSubmit}
             style={{ marginTop: 8 }}
           />
         </GlowCard>
 
         {/* Result */}
-        {status === 'succeeded' && result && (
+        {submitStatus === 'succeeded' && submitted && (
           <View
             style={[
               styles.feedback,
@@ -127,15 +138,24 @@ export default function ScraperScreen() {
             ]}
           >
             <Text style={[styles.feedbackTitle, { color: colors.success }]}>
-              ✓ Success
+              ✓ Request Accepted
             </Text>
             <Text style={[styles.feedbackBody, { color: colors.text }]}>
-              {JSON.stringify(result, null, 2)}
+              Your crawl job has been queued. You can monitor the progress and view the answer live in the History tab.
             </Text>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/history')}
+              style={[styles.historyBtn, { backgroundColor: colors.primary }]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.historyBtnText, { color: colors.onPrimary }]}>
+                View in History
+              </Text>
+            </TouchableOpacity>
           </View>
         )}
 
-        {status === 'failed' && error && (
+        {submitStatus === 'failed' && submitError && (
           <View
             style={[
               styles.feedback,
@@ -148,11 +168,13 @@ export default function ScraperScreen() {
             <Text style={[styles.feedbackTitle, { color: colors.error }]}>
               ✗ Error
             </Text>
-            <Text style={[styles.feedbackBody, { color: colors.text }]}>{error}</Text>
+            <Text style={[styles.feedbackBody, { color: colors.text }]}>
+              {submitError}
+            </Text>
           </View>
         )}
 
-        {(status === 'succeeded' || status === 'failed') && (
+        {(submitted || submitStatus === 'failed') && (
           <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
             <Text style={[styles.clearText, { color: colors.primary }]}>
               Clear
@@ -160,6 +182,7 @@ export default function ScraperScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+
     </SpaceBackground>
   );
 }
@@ -231,4 +254,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  historyBtn: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  historyBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });
+
