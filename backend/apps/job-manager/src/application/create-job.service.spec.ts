@@ -6,7 +6,7 @@ import {
   MAX_CRAWL_DEPTH,
   type JobRequestsMessage,
 } from '@app/kafka-contracts';
-import type { IEventPublisher } from '../infrastructure/interfaces/event-publisher.interface';
+import type { IEventPublisher } from '@app/kafka-client';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { Job } from '../models/job';
 import { CreateJobService } from './create-job.service';

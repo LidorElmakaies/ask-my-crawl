@@ -14,7 +14,10 @@ function fakeConfig(brokers: string[]): ConfigService {
 }
 
 // Infrastructure-integration tier — real Kafka via testcontainers, no mocking. See
-// jest-integration.config.js. Run via `npm run test:integration` (requires Docker).
+// jest-integration.config.js. Run via `npm run test:integration` (requires Docker). Moved here
+// from job-manager's own infra folder when KafkajsEventPublisher itself moved to this shared lib —
+// the class under test is now shared, so its integration coverage lives alongside it rather than
+// under whichever service happened to write the test first.
 describe('KafkajsEventPublisher (integration)', () => {
   let container: StartedKafkaContainer;
   let brokers: string[];
@@ -26,7 +29,7 @@ describe('KafkajsEventPublisher (integration)', () => {
     brokers = started.brokers;
     await createKafkaTopics(brokers, [TOPIC]);
 
-    publisher = new KafkajsEventPublisher(fakeConfig(brokers));
+    publisher = new KafkajsEventPublisher(fakeConfig(brokers), 'test-client');
     await publisher.onModuleInit();
   });
 

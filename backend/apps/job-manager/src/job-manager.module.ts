@@ -7,7 +7,7 @@ import { JobsController } from './api/controllers/jobs.controller';
 import { CreateJobService } from './application/create-job.service';
 import { GetJobsService } from './application/get-jobs.service';
 import { SaveJobResultService } from './application/save-job-result.service';
-import { KafkajsEventPublisher } from './infrastructure/kafka/kafkajs-event-publisher';
+import { KafkajsEventPublisher } from '@app/kafka-client';
 import { JobEntity } from './infrastructure/postgres/entities/job.entity';
 import { TypeOrmJobRepository } from './infrastructure/postgres/typeorm-job.repository';
 import {
@@ -42,8 +42,12 @@ import {
     { provide: SAVE_JOB_RESULT_USE_CASE, useClass: SaveJobResultService },
     { provide: GET_JOBS_USE_CASE, useClass: GetJobsService },
     { provide: JOB_REPOSITORY, useClass: TypeOrmJobRepository },
-    { provide: EVENT_PUBLISHER, useClass: KafkajsEventPublisher },
+    {
+      provide: EVENT_PUBLISHER,
+      useFactory: (config: ConfigService) =>
+        new KafkajsEventPublisher(config, 'job-manager'),
+      inject: [ConfigService],
+    },
   ],
 })
 export class JobManagerModule {}
-

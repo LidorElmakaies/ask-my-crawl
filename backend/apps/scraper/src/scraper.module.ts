@@ -9,7 +9,7 @@ import { BullMqProcessUrlQueue } from './infrastructure/bullmq/bullmq-process-ur
 import { CheerioLinkExtractor } from './infrastructure/html/cheerio-link-extractor';
 import { FetchPageFetcher } from './infrastructure/http/fetch-page.fetcher';
 import { RobotsTxtChecker } from './infrastructure/http/robots-txt.checker';
-import { KafkajsEventPublisher } from './infrastructure/kafka/kafkajs-event-publisher';
+import { KafkajsEventPublisher } from '@app/kafka-client';
 import { RedisCoordinationStore } from './infrastructure/redis/redis-coordination.store';
 import { S3BlobRepository } from './infrastructure/seaweedfs/s3-blob.repository';
 import {
@@ -56,7 +56,12 @@ import {
     { provide: PAGE_FETCHER, useClass: FetchPageFetcher },
     { provide: ROBOTS_TXT_CHECKER, useClass: RobotsTxtChecker },
     { provide: HTML_LINK_EXTRACTOR, useClass: CheerioLinkExtractor },
-    { provide: EVENT_PUBLISHER, useClass: KafkajsEventPublisher },
+    {
+      provide: EVENT_PUBLISHER,
+      useFactory: (config: ConfigService) =>
+        new KafkajsEventPublisher(config, 'scraper'),
+      inject: [ConfigService],
+    },
     { provide: PROCESS_URL_QUEUE, useClass: BullMqProcessUrlQueue },
   ],
 })

@@ -8,7 +8,7 @@ import {
   type JobRequestsMessage,
 } from '@app/kafka-contracts';
 import { EVENT_PUBLISHER, JOB_REPOSITORY } from '../tokens';
-import type { IEventPublisher } from '../infrastructure/interfaces/event-publisher.interface';
+import type { IEventPublisher } from '@app/kafka-client';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { ICreateJobUseCase } from './interfaces/create-job-use-case.interface';
 

@@ -23,7 +23,7 @@ import {
 } from '../models/url';
 import type { IBlobRepository } from '../infrastructure/interfaces/blob-repository.interface';
 import type { ICoordinationStore } from '../infrastructure/interfaces/coordination-store.interface';
-import type { IEventPublisher } from '../infrastructure/interfaces/event-publisher.interface';
+import type { IEventPublisher } from '@app/kafka-client';
 import type { IHtmlLinkExtractor } from '../infrastructure/interfaces/html-link-extractor.interface';
 import type { IPageFetcher } from '../infrastructure/interfaces/page-fetcher.interface';
 import type { IRobotsTxtChecker } from '../infrastructure/interfaces/robots-txt-checker.interface';

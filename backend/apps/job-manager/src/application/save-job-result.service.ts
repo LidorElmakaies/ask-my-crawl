@@ -5,7 +5,7 @@ import {
   type ResultSavedMessage,
 } from '@app/kafka-contracts';
 import { EVENT_PUBLISHER, JOB_REPOSITORY } from '../tokens';
-import type { IEventPublisher } from '../infrastructure/interfaces/event-publisher.interface';
+import type { IEventPublisher } from '@app/kafka-client';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { ISaveJobResultUseCase } from './interfaces/save-job-result-use-case.interface';
 

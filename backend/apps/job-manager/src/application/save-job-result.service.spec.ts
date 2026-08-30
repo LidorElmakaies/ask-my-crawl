@@ -2,7 +2,7 @@
    false positive: these are jest.fn() mocks, not real prototype methods relying on `this`. */
 import { Logger } from '@nestjs/common';
 import { KAFKA_TOPICS, type AnswerReadyMessage } from '@app/kafka-contracts';
-import type { IEventPublisher } from '../infrastructure/interfaces/event-publisher.interface';
+import type { IEventPublisher } from '@app/kafka-client';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { Job } from '../models/job';
 import { SaveJobResultService } from './save-job-result.service';

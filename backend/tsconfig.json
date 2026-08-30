@@ -46,6 +46,12 @@
       "@app/kafka-contracts/*": [
         "libs/kafka-contracts/src/*"
       ],
+      "@app/kafka-client": [
+        "libs/kafka-client/src"
+      ],
+      "@app/kafka-client/*": [
+        "libs/kafka-client/src/*"
+      ],
       "@app/testing": [
         "libs/testing/src"
       ],

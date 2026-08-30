@@ -18,8 +18,11 @@ export const AUTH_SERVICE_CLIENT = Symbol('IAuthServiceClient');
 export const JOBS_PROXY_SERVICE = Symbol('IJobsProxyService');
 export const JOB_SERVICE_CLIENT = Symbol('IJobServiceClient');
 export const JOB_REQUESTS_PUBLISHER = Symbol('IJobRequestsPublisher');
+// The shared @app/kafka-client publisher KafkaJobRequestsPublisher delegates to, bound separately
+// so it's swappable/mockable on its own — not because anything else in Gateway publishes Kafka
+// messages today.
+export const EVENT_PUBLISHER = Symbol('IEventPublisher');
 
 // tool-proxy/ — no tokens of its own. AdminAuthGateMiddleware depends directly on
 // AUTH_TOKEN_SERVICE (@app/auth-kernel); there's no new business logic here to put behind an
 // interface (see tool-proxy.module.ts's header comment).
-
