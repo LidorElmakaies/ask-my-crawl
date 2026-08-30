@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +11,8 @@ import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../src/components/GlowCard';
 import GradientButton from '../../src/components/GradientButton';
+import InfoBox from '../../src/components/InfoBox';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 import { clearJobsError, submitJobRequest } from '../../src/store/slices/jobsSlice';
@@ -54,12 +55,11 @@ export default function ScraperScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
-          <Text style={[styles.heading, { color: colors.text }]}>Scrape a URL</Text>
-          <Text style={[styles.subheading, { color: colors.textMuted }]}>
-            Enter any web address below
-          </Text>
-        </View>
+        <ScreenHeader
+          title="Scrape a URL"
+          subtitle="Enter any web address below"
+          style={styles.header}
+        />
 
         <GlowCard>
           {/* Label */}
@@ -128,15 +128,7 @@ export default function ScraperScreen() {
 
         {/* Result */}
         {submitStatus === 'succeeded' && submitted && (
-          <View
-            style={[
-              styles.feedback,
-              {
-                backgroundColor: colors.successBg,
-                borderColor: colors.successBorder,
-              },
-            ]}
-          >
+          <InfoBox variant="success" style={styles.feedback}>
             <Text style={[styles.feedbackTitle, { color: colors.success }]}>
               ✓ Request Accepted
             </Text>
@@ -152,26 +144,18 @@ export default function ScraperScreen() {
                 View in History
               </Text>
             </TouchableOpacity>
-          </View>
+          </InfoBox>
         )}
 
         {submitStatus === 'failed' && submitError && (
-          <View
-            style={[
-              styles.feedback,
-              {
-                backgroundColor: colors.errorBg,
-                borderColor: colors.errorBorder,
-              },
-            ]}
-          >
+          <InfoBox variant="error" style={styles.feedback}>
             <Text style={[styles.feedbackTitle, { color: colors.error }]}>
               ✗ Error
             </Text>
             <Text style={[styles.feedbackBody, { color: colors.text }]}>
               {submitError}
             </Text>
-          </View>
+          </InfoBox>
         )}
 
         {(submitted || submitStatus === 'failed') && (
@@ -194,16 +178,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    gap: 4,
     marginBottom: 4,
-  },
-  heading: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  subheading: {
-    fontSize: 14,
   },
   label: {
     fontSize: 11,

@@ -145,7 +145,7 @@ of the `jobs` table, and exposes internal `GET /jobs` and `GET /jobs/:id` endpoi
   answered).
 - **Responsibilities**: consumes `job-requests` (`{user_id, url, query}`); generates a `job_id` and
   inserts the `jobs` row with those 3 fields plus the new `id` and a `NULL` `result`; publishes the seed
-  `crawl-frontier` message (`{job_id, user_id, url, depth: 1, query}`); publishes `job-created` so Gateway
+  `crawl-frontier` message (`{job_id, user_id, url, depth: MAX_CRAWL_DEPTH, query}`); publishes `job-created` so Gateway
   can relay the new `job_id` to the submitting user over WebSocket. On `answer-ready`, updates `jobs.result`
   and publishes `result-saved`. On `GET /jobs`, returns user-scoped or admin-filtered jobs.
 - **Talks to**: Kafka (`job-requests` in, `crawl-frontier` seed + `job-created` out, `answer-ready`

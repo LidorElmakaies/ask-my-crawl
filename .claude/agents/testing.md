@@ -45,20 +45,22 @@ at its boundaries — not just "does it not crash." Concretely, for each service
 - **Logs**: where a service logs something meaningful (an error being swallowed, a job transitioning
   status, a notification send failing), assert the log actually happens with the expected level and
   content — a silently-eaten error with no log line is a bug even if the test otherwise passes.
-- **Kafka and coordination-store input/output** (nothing produces/consumes a Kafka topic or
-  touches a coordination store today — applies once something does): for each producer, assert the
-  exact payload and topic; for each consumer, assert it
-  correctly parses a valid message and rejects a malformed one. For whatever backs job/URL
-  coordination, assert the exact command/operation issued, not just the eventual state — atomicity
-  and ordering guarantees are the actual thing being protected, and that's true regardless of which
-  storage/mechanism ends up implementing them.
+- **Kafka and coordination-store input/output**: Job Manager Service, the Scraper, and Gateway's
+  `jobs-proxy`/`realtime` consumers are real producers/consumers today, and the Scraper touches
+  real Redis coordination state — this is no longer a hypothetical to defer. For each producer,
+  assert the exact payload and topic; for each consumer, assert it correctly parses a valid message
+  and rejects a malformed one. For whatever backs job/URL coordination, assert the exact
+  command/operation issued, not just the eventual state — atomicity and ordering guarantees are the
+  actual thing being protected, and that's true regardless of which storage/mechanism ends up
+  implementing them.
 
 ## Scenarios that matter more than generic CRUD coverage here
 
 This system's actual risk is in the concurrency and ordering guarantees the pipeline depends on —
 prioritize these over exhaustive input-validation tests. These scenarios are written directly
-against the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`, not
-implemented yet):
+against the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`) — the
+Scraper is implemented (`backend/apps/scraper`) and these should run against its real code; the
+Indexer is not implemented yet, so its scenarios below are still forward-looking:
 
 - **Frontier Consumer dedup gate**: prove `SADD crawl:{job_id}:visited` under real concurrency
   (testcontainers Redis, not a mocked client) lets exactly one message through per normalized URL

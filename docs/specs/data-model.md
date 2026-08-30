@@ -50,7 +50,7 @@ CREATE INDEX ON refresh_tokens (user_id);
 
 ## Owned by Job Manager Service
 
-**Not implemented.** One table.
+**Implemented** (`backend/apps/job-manager`). One table.
 
 ```sql
 CREATE TABLE jobs (
@@ -100,13 +100,13 @@ Real gaps in this table, worth stating plainly rather than glossing over:
 
 ## Owned by the Scraper and the Indexer
 
-**Not implemented.** Neither owns a Postgres table:
+Neither owns a Postgres table:
 
-- **Scraper** writes raw HTML to **SeaweedFS** (self-hosted, S3-compatible blob store), keyed by
-  `sha256(normalizedUrl)`. No freshness/TTL logic, no cross-job cache — every job fetches and
-  overwrites the blob for a URL it visits.
-- **Indexer** writes embedded chunks to **Milvus** (self-hosted vector DB). Milvus needs an explicit
-  collection schema, not inferred from writes:
+- **Scraper** — **implemented** (`backend/apps/scraper`). Writes raw HTML to **SeaweedFS**
+  (self-hosted, S3-compatible blob store), keyed by `sha256(normalizedUrl)`. No freshness/TTL
+  logic, no cross-job cache — every job fetches and overwrites the blob for a URL it visits.
+- **Indexer** — **not implemented**. Writes embedded chunks to **Milvus** (self-hosted vector DB).
+  Milvus needs an explicit collection schema, not inferred from writes:
   - **Vector field**: dimension TBD — set by whichever embedding model is loaded into LM Studio
     (e.g. 768 or 1024, model-dependent; see `docs/specs/README.md`'s stack section). Index
     type/metric: `HNSW` + `COSINE`.

@@ -48,7 +48,7 @@ else in this file.
 | Service | Image/build | Port | Notes |
 |---|---|---|---|
 | `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector extension — per the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`), pgvector **isn't needed at all**: embeddings live in a separate self-hosted Milvus instance, not Postgres. Don't swap this image for a pgvector-enabled one. `POSTGRES_DB=askmycrawl`, shared by every table-owning service (see "Non-negotiables" below) |
-| `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime + HTTP proxy to Auth Service (`/auth/*`, `/me`, `/admin/users*`); CORS enabled (`origin: true`, dev-permissive) |
+| `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime + HTTP proxy to Auth Service (`/auth/*`, `/me`, `/admin/users*`) + `/jobs*` proxy to Job Manager Service (`POST /jobs` publishes `job-requests` directly; `GET /jobs*` forwards). Also a Kafka consumer (`job-created`/`result-saved`, relayed onto WS) and a Kafka producer (`job-requests`); CORS enabled (`origin: true`, dev-permissive) |
 | `auth` | `backend/apps/auth/Dockerfile` | 8001 | Called only by the Gateway now (server-to-server) — the frontend never reaches this directly, that's a hard project rule. CORS still enabled (`origin: true`) but is dead config at this point; port still published to the host for direct debugging/curl, not because anything else needs it — worth reconsidering both, not done yet |
 | `job-manager` | `backend/apps/job-manager/Dockerfile` | — (no HTTP surface) | Kafka-only microservice (`NestFactory.createMicroservice`, `Transport.KAFKA`) — consumes `job-requests`/`answer-ready`, produces `crawl-frontier` (seed)/`job-created`/`result-saved`. Writes the `jobs` table on the shared `askmycrawl` Postgres database (see the `postgres` row above) |
 | `scraper` | `backend/apps/scraper/Dockerfile` | — (no HTTP surface) | Kafka-only microservice + a BullMQ worker running in the same process (`ProcessUrlWorker`, started from its own `OnModuleInit`, independent of the Kafka transport). Consumes `crawl-frontier`, produces `crawl-frontier` (children)/`page-scraped`/`crawl-complete`. Owns no Postgres table — writes raw HTML to `seaweedfs` and coordination state to `redis` instead |
@@ -466,11 +466,11 @@ one so this is the only valid choice), retention config set explicitly from the 
 
 | Topic | Partitions (spec / actual) | Retention (spec / actual) | Status |
 |---|---|---|---|
-| `job-requests` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28, Job Manager Service packaging); consumed by Job Manager Service, not yet produced (awaits Gateway) |
+| `job-requests` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28, Job Manager Service packaging); produced by Gateway's `jobs-proxy` on `POST /jobs`, consumed by Job Manager Service |
 | `crawl-frontier` | 6 / 6 | 1 day / `retention.ms=86400000` | created (2026-08-28); seed-produced by Job Manager Service, consumed **and** re-produced by the Scraper's Frontier Consumer/Scraper Worker (2026-08-28) |
-| `job-created` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, no consumer wired up yet (awaits Gateway) |
+| `job-created` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, consumed by Gateway (relayed onto WS as `job.created`) |
 | `answer-ready` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); consumed by Job Manager Service, not yet produced (awaits Query/Answer Service) — created anyway since `auto.create.topics.enable=false` would otherwise reject the consumer at startup |
-| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, no consumer wired up yet (awaits Gateway) |
+| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, consumed by Gateway (relayed onto WS as `job.completed`) |
 | `crawl-complete` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28, Scraper packaging); produced by the Scraper (whichever component wins the completion race — currently always the Scraper, since the Indexer doesn't exist yet), no consumer wired up yet (awaits Query/Answer Service) |
 | `page-scraped` | TBD / 6 | TBD / `retention.ms=86400000` | created (2026-08-28); the plan doc left partitions/retention as "decide when wiring up kafka-init" — decided: 6 partitions (matching `crawl-frontier`'s spread), 1 day retention (matching every other topic). Produced by the Scraper, no consumer wired up yet (awaits the Indexer) |
 
