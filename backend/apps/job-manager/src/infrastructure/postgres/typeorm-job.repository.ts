@@ -41,4 +41,22 @@ export class TypeOrmJobRepository implements IJobRepository {
     const entity = await this.repo.findOneBy({ id: jobId });
     return entity ? toDomain(entity) : null;
   }
+
+  async findByUserId(userId: string): Promise<Job[]> {
+    const entities = await this.repo.findBy({ user_id: userId });
+    return entities.map(toDomain);
+  }
+
+  async findAll(filterUserId?: string): Promise<Job[]> {
+    const entities = filterUserId
+      ? await this.repo.findBy({ user_id: filterUserId })
+      : await this.repo.find();
+    return entities.map(toDomain);
+  }
+
+  async findById(jobId: string): Promise<Job | null> {
+    const entity = await this.repo.findOneBy({ id: jobId });
+    return entity ? toDomain(entity) : null;
+  }
 }
+

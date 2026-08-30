@@ -39,7 +39,12 @@ docs/planning/            Raw decision log — why things are the way they are
   get a token), `/me` (`JwtAuthGuard`), `/admin/users*` (`JwtAuthGuard` + `RolesGuard('admin')`).
   Gateway checks the token/role locally first (fast-fail, no network call for an obviously bad
   request), then forwards to Auth Service and relays its response verbatim — a thin pass-through,
-  not a translation layer, per `docs/specs/services.md`.
+  not a translation layer, per `docs/specs/services.md`. **Plus** a third concern, `src/jobs-proxy/`
+  (`JwtAuthGuard`): `POST /jobs` publishes a `job-requests` Kafka message directly (no synchronous
+  call to Job Manager Service, no `job_id` in the `202` response) and `GET /jobs*` forwards to Job
+  Manager Service's internal HTTP API. `src/realtime/` also runs the `job-created`/`result-saved`
+  Kafka consumers that relay each event onto the matching user's WebSocket connection as
+  `job.created`/`job.completed`.
 - **Auth Service** (`backend/apps/auth`) — register/login/refresh/logout, `/me`, `/admin/users*`.
   Full clean-architecture implementation, Postgres via TypeORM. Still runs on its own port
   (`8001`), but only the Gateway calls it now — **the frontend never talks to any backend service

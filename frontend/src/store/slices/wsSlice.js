@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import * as socketService from '../../services/socketService';
+import { jobCompleted, jobCreated } from './jobsSlice';
 
 // All frontend events go through thunks, never a custom hook holding connection state — a
 // component only ever dispatches connectWebSocket()/disconnectWebSocket() and reads
@@ -36,11 +37,19 @@ export const connectWebSocket = createAsyncThunk(
             reject(err);
           }
         },
-        onMessage: (payload) => dispatch(wsMessageReceived(payload)),
+        onMessage: (payload) => {
+          dispatch(wsMessageReceived(payload));
+          if (payload?.type === 'job.created') {
+            dispatch(jobCreated(payload));
+          } else if (payload?.type === 'job.completed') {
+            dispatch(jobCompleted(payload));
+          }
+        },
       });
     });
   },
 );
+
 
 export const disconnectWebSocket = createAsyncThunk('ws/disconnect', async () => {
   socketService.disconnect();

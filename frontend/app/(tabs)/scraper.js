@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,34 +7,47 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../src/components/GlowCard';
 import GradientButton from '../../src/components/GradientButton';
+import InfoBox from '../../src/components/InfoBox';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
-import { clearScraper, submitScrapeRequest } from '../../src/store/slices/scraperSlice';
+import { clearJobsError, submitJobRequest } from '../../src/store/slices/jobsSlice';
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
   const [queryFocused, setQueryFocused] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const router = useRouter();
   const dispatch = useDispatch();
-  const { status, result, error } = useSelector((state) => state.scraper);
+  const { submitStatus, submitError } = useSelector((state) => state.jobs);
   const { colors } = useAppTheme();
 
   const canSubmit = !!input.trim() && !!query.trim();
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) return;
-    dispatch(submitScrapeRequest({ url: input.trim(), query: query.trim() }));
+    setSubmitted(false);
+    const action = await dispatch(
+      submitJobRequest({ url: input.trim(), query: query.trim() }),
+    );
+    if (submitJobRequest.fulfilled.match(action)) {
+      setSubmitted(true);
+    }
   };
 
   const handleClear = () => {
     setInput('');
     setQuery('');
-    dispatch(clearScraper());
+    setSubmitted(false);
+    dispatch(clearJobsError());
   };
+
 
   return (
     <SpaceBackground>
@@ -43,12 +55,11 @@ export default function ScraperScreen() {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.header}>
-          <Text style={[styles.heading, { color: colors.text }]}>Scrape a URL</Text>
-          <Text style={[styles.subheading, { color: colors.textMuted }]}>
-            Enter any web address below
-          </Text>
-        </View>
+        <ScreenHeader
+          title="Scrape a URL"
+          subtitle="Enter any web address below"
+          style={styles.header}
+        />
 
         <GlowCard>
           {/* Label */}
@@ -109,50 +120,45 @@ export default function ScraperScreen() {
           <GradientButton
             label="Send Request"
             onPress={handleSubmit}
-            loading={status === 'loading'}
+            loading={submitStatus === 'loading'}
             disabled={!canSubmit}
             style={{ marginTop: 8 }}
           />
         </GlowCard>
 
         {/* Result */}
-        {status === 'succeeded' && result && (
-          <View
-            style={[
-              styles.feedback,
-              {
-                backgroundColor: colors.successBg,
-                borderColor: colors.successBorder,
-              },
-            ]}
-          >
+        {submitStatus === 'succeeded' && submitted && (
+          <InfoBox variant="success" style={styles.feedback}>
             <Text style={[styles.feedbackTitle, { color: colors.success }]}>
-              ✓ Success
+              ✓ Request Accepted
             </Text>
             <Text style={[styles.feedbackBody, { color: colors.text }]}>
-              {JSON.stringify(result, null, 2)}
+              Your crawl job has been queued. You can monitor the progress and view the answer live in the History tab.
             </Text>
-          </View>
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/history')}
+              style={[styles.historyBtn, { backgroundColor: colors.primary }]}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.historyBtnText, { color: colors.onPrimary }]}>
+                View in History
+              </Text>
+            </TouchableOpacity>
+          </InfoBox>
         )}
 
-        {status === 'failed' && error && (
-          <View
-            style={[
-              styles.feedback,
-              {
-                backgroundColor: colors.errorBg,
-                borderColor: colors.errorBorder,
-              },
-            ]}
-          >
+        {submitStatus === 'failed' && submitError && (
+          <InfoBox variant="error" style={styles.feedback}>
             <Text style={[styles.feedbackTitle, { color: colors.error }]}>
               ✗ Error
             </Text>
-            <Text style={[styles.feedbackBody, { color: colors.text }]}>{error}</Text>
-          </View>
+            <Text style={[styles.feedbackBody, { color: colors.text }]}>
+              {submitError}
+            </Text>
+          </InfoBox>
         )}
 
-        {(status === 'succeeded' || status === 'failed') && (
+        {(submitted || submitStatus === 'failed') && (
           <TouchableOpacity onPress={handleClear} style={styles.clearBtn}>
             <Text style={[styles.clearText, { color: colors.primary }]}>
               Clear
@@ -160,6 +166,7 @@ export default function ScraperScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+
     </SpaceBackground>
   );
 }
@@ -171,16 +178,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   header: {
-    gap: 4,
     marginBottom: 4,
-  },
-  heading: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  subheading: {
-    fontSize: 14,
   },
   label: {
     fontSize: 11,
@@ -231,4 +229,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  historyBtn: {
+    marginTop: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignSelf: 'flex-start',
+  },
+  historyBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });
+

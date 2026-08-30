@@ -134,8 +134,11 @@ providers itself. Gateway qualifies because it's the system's edge, explicitly d
 
 ```
 apps/gateway/src/
-  realtime/                          # WS connection registry — owns nothing, ephemeral
+  realtime/                          # WS connection registry — owns nothing, ephemeral. Also hosts
+                                      # the job-created/result-saved Kafka consumers that relay onto
+                                      # the matching WS connection (job-updates.controller.ts)
     api/realtime.gateway.ts
+    api/job-updates.controller.ts
     application/realtime-connection.service.ts
     application/interfaces/realtime-connection.interface.ts
     infrastructure/websocket/in-memory-connection-store.ts
@@ -148,15 +151,26 @@ apps/gateway/src/
     infrastructure/auth-service-http.client.ts
     infrastructure/interfaces/auth-service-client.interface.ts
     auth-proxy.module.ts
+  jobs-proxy/                        # POST/GET /jobs* — owns nothing. POST publishes job-requests
+                                      # onto Kafka directly; GET forwards to Job Manager Service
+    api/jobs-proxy.controller.ts
+    application/jobs-proxy.service.ts
+    application/interfaces/jobs-proxy-service.interface.ts
+    infrastructure/job-service-http.client.ts
+    infrastructure/kafka-job-requests.publisher.ts
+    infrastructure/interfaces/job-service-client.interface.ts
+    infrastructure/interfaces/job-requests-publisher.interface.ts
+    jobs-proxy.module.ts
   tokens.ts                          # DI tokens for every concern, centralized (see below)
-  gateway.module.ts                  # imports RealtimeModule + AuthProxyModule, owns nothing else
+  gateway.module.ts                  # imports RealtimeModule + AuthProxyModule + JobsProxyModule,
+                                      # owns nothing else
 ```
 
 **The test, when it's not obvious: would these concerns ever share a model, an Application
 service, or an Infrastructure adapter — or would one ever call the other?** If no to all three,
-they're independent and each gets its own folder. If a future concern (e.g. a `jobs-proxy/` for
-`POST/GET /jobs*` → Job Manager Service, per `services.md`) is added to Gateway, it follows the
-identical shape as a third sibling folder, not a special case.
+they're independent and each gets its own folder. `jobs-proxy/` above followed exactly this test
+when it was added; the next new concern Gateway picks up follows the identical shape as another
+sibling folder, not a special case.
 
 **DI tokens for a multi-concern app stay in one file at the app root** (`tokens.ts`), grouped by
 concern with a comment, not split into a `tokens.ts` per concern folder — one registry per app

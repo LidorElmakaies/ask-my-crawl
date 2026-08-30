@@ -7,10 +7,10 @@ chosen for even load distribution, not ordering guarantees.
 
 ## `job-requests`
 
-**Not implemented.** It should fire from Gateway on `POST /jobs`, before any job row exists —
-Gateway does not call Job Manager Service synchronously to create the job row. It publishes this
-message and responds `202` immediately, with no `job_id` yet (Gateway doesn't have one to give).
-See `job-created` below for how the frontend eventually learns the real `job_id`.
+**Implemented.** Fires from Gateway on `POST /jobs`, before any job row exists — Gateway does not
+call Job Manager Service synchronously to create the job row. It publishes this message and
+responds `202` immediately, with no `job_id` yet (Gateway doesn't have one to give). See
+`job-created` below for how the frontend eventually learns the real `job_id`.
 
 - **Producers**: Gateway
 - **Consumers**: Job Manager Service, consumer group `job-manager`
@@ -66,10 +66,10 @@ one topic (the seed producer and the Scraper both publish onto it).
 
 ## `job-created`
 
-**Not implemented.** It should fire from Job Manager Service once it has actually created the
-`jobs` row and published the seed `crawl-frontier` message — this is how the frontend learns the
-real `job_id` that `POST /jobs` couldn't return synchronously, since Gateway never has one (see
-`job-requests` above).
+**Implemented.** Fires from Job Manager Service once it has actually created the `jobs` row and
+published the seed `crawl-frontier` message — this is how the frontend learns the real `job_id`
+that `POST /jobs` couldn't return synchronously, since Gateway never has one (see `job-requests`
+above).
 
 - **Producers**: Job Manager Service
 - **Consumers**: Gateway, consumer group `gateway`
@@ -152,14 +152,17 @@ verified live: a real crawl produced an accurate `succeeded_count`/`failed_count
 
 ## `answer-ready`
 
-**Not implemented.** It should fire once Query/Answer Service has run retrieval + the LLM call. Two
-independent consumer groups read this topic in parallel — Kafka pub/sub, not point-to-point — since
-the answer goes to both notification and persistence at the same stage.
+**Implemented** (the consuming side — Job Manager Service). **Not implemented** (the producing
+side — Query/Answer Service doesn't exist yet, so nothing publishes this topic in the live stack
+today). It should fire once Query/Answer Service has run retrieval + the LLM call. Two independent
+consumer groups read this topic in parallel — Kafka pub/sub, not point-to-point — since the answer
+goes to both notification and persistence at the same stage.
 
-- **Producers**: Query/Answer Service
+- **Producers**: Query/Answer Service (not implemented — no producer exists yet)
 - **Consumers**:
-  - Notification Service, consumer group `notification-service`
-  - Job Manager Service, consumer group `job-manager`
+  - Notification Service, consumer group `notification-service` (not implemented)
+  - Job Manager Service, consumer group `job-manager` (implemented — writes `jobs.result` and
+    publishes `result-saved`, see `save-job-result.service.ts`)
 - **Partition key**: `job_id`
 - **Value**:
   ```jsonc
@@ -175,9 +178,8 @@ the answer goes to both notification and persistence at the same stage.
 
 ## `result-saved`
 
-**Not implemented.** It should fire from Job Manager Service once it has written the answer into
-the `jobs.result` column, so the Gateway can push the update to the user's open WebSocket
-connection.
+**Implemented.** Fires from Job Manager Service once it has written the answer into the
+`jobs.result` column, so the Gateway can push the update to the user's open WebSocket connection.
 
 - **Producers**: Job Manager Service
 - **Consumers**: Gateway, consumer group `gateway`

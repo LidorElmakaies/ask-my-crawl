@@ -3,6 +3,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import { FLUSH, PAUSE, PERSIST, persistReducer, persistStore, PURGE, REGISTER, REHYDRATE } from 'redux-persist';
 import adminReducer from './slices/adminSlice';
 import authReducer from './slices/authSlice';
+import jobsReducer from './slices/jobsSlice';
 import scraperReducer from './slices/scraperSlice';
 import themeReducer from './slices/themeSlice';
 import wsReducer from './slices/wsSlice';
@@ -27,6 +28,7 @@ export const store = configureStore({
     auth: persistReducer(authPersistConfig, authReducer),
     ws: wsReducer, // ephemeral, like scraper — connection status shouldn't survive a reload
     admin: adminReducer, // ephemeral, like scraper/ws — user list is re-fetched each visit
+    jobs: jobsReducer, // ephemeral, like admin/scraper — history is re-fetched each visit
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
@@ -35,5 +37,6 @@ export const store = configureStore({
       },
     }),
 });
+
 
 export const persistor = persistStore(store);

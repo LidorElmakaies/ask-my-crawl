@@ -137,26 +137,21 @@ call to Auth Service) and send email + SMS + Telegram, logging each attempt.
 
 ## Job Manager Service
 
-**Not implemented.** This is the service that turns a `job-requests` message into a real job: it
-creates the `crawl-frontier` seed the Scraper's BFS depends on, and is the only writer of the
-`jobs` table Gateway's `GET /jobs*` reads.
+**Implemented** (`backend/apps/job-manager`) — This is the service that turns a `job-requests` message
+into a real job: it creates the `crawl-frontier` seed the Scraper's BFS depends on, manages the lifecycle
+of the `jobs` table, and exposes internal `GET /jobs` and `GET /jobs/:id` endpoints for Gateway's read proxy.
 
 - **Owns**: `jobs` — one table: `id` (generated), `user_id`, `url`, `query`, `result` (`NULL` until
   answered).
-- **Responsibilities**: it should consume `job-requests` (`{user_id, url, query}`, no `job_id` —
-  Gateway never has one to give); generate a `job_id` (Postgres `gen_random_uuid()`) and insert the
-  `jobs` row with exactly those 3 fields plus the new `id` and a `NULL` `result`; publish the seed
-  `crawl-frontier` message (`{job_id, user_id, url, depth: 1, query}` — max crawl depth is a fixed
-  system constant used by the Scraper, not stored or passed here, see `data-model.md`); publish
-  `job-created` so Gateway can relay the new `job_id` to the submitting user over WebSocket (Gateway
-  has no `job_id` to return synchronously from `POST /jobs`). On `answer-ready`, it should write the
-  answer text into `jobs.result` (an `UPDATE`, not an insert into a separate table) and publish
-  `result-saved`. A row is "done" purely by `result` going from `NULL` to non-`NULL` — there is no
-  status column, and a crawl/answer failure has no representation on this row at all (a real gap,
-  see `data-model.md`).
+- **Responsibilities**: consumes `job-requests` (`{user_id, url, query}`); generates a `job_id` and
+  inserts the `jobs` row with those 3 fields plus the new `id` and a `NULL` `result`; publishes the seed
+  `crawl-frontier` message (`{job_id, user_id, url, depth: MAX_CRAWL_DEPTH, query}`); publishes `job-created` so Gateway
+  can relay the new `job_id` to the submitting user over WebSocket. On `answer-ready`, updates `jobs.result`
+  and publishes `result-saved`. On `GET /jobs`, returns user-scoped or admin-filtered jobs.
 - **Talks to**: Kafka (`job-requests` in, `crawl-frontier` seed + `job-created` out, `answer-ready`
-  in, `result-saved` out), Postgres (`jobs`), Gateway (internal call, inbound — read path only,
+  in, `result-saved` out), Postgres (`jobs`), Gateway (internal HTTP call, inbound — read path only,
   `GET /jobs*`).
+
 
 ## Internal (service-to-service) calls
 

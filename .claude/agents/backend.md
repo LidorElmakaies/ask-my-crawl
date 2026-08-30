@@ -18,8 +18,12 @@ service in `docs/specs/services.md`:
 ```
 backend/
   apps/
-    gateway/              # implemented — realtime/WS via Socket.IO, plus HTTP proxy to Auth
-                          # Service (src/auth-proxy/): /auth/*, /me, /admin/users*
+    gateway/              # implemented — realtime/WS via Socket.IO (src/realtime/, also hosts the
+                          # job-created/result-saved Kafka consumers that relay onto the matching
+                          # WS connection), HTTP proxy to Auth Service (src/auth-proxy/): /auth/*,
+                          # /me, /admin/users*, and src/jobs-proxy/: POST /jobs (publishes
+                          # job-requests directly, no synchronous call) + GET /jobs* (forwards to
+                          # Job Manager Service)
     auth/                 # implemented — register/login/refresh/logout, /me, /admin/users*
     job-manager/          # implemented — consumes job-requests, creates the one-row `jobs` entry
                           # (id/user_id/url/query/result — see data-model.md), publishes the
