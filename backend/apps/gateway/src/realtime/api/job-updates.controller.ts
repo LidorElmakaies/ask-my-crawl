@@ -44,7 +44,9 @@ export class JobUpdatesController {
   }
 
   @EventPattern(KAFKA_TOPICS.RESULT_SAVED)
-  async handleResultSaved(@Payload() message: ResultSavedMessage): Promise<void> {
+  async handleResultSaved(
+    @Payload() message: ResultSavedMessage,
+  ): Promise<void> {
     this.logger.log(
       `Received result-saved event for job_id=${message.job_id} user_id=${message.user_id}`,
     );

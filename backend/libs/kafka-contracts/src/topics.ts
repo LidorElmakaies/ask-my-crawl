@@ -24,4 +24,6 @@ export const KAFKA_CONSUMER_GROUPS = {
   GATEWAY: 'gateway',
   // The Scraper's Frontier Consumer (crawl-frontier) — per docs/specs/services.md.
   SCRAPER: 'scraper',
+  // The Indexer's Index Intake Consumer (page-scraped) — per docs/specs/services.md.
+  INDEXER: 'indexer',
 } as const;

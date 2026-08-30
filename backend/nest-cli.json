@@ -55,6 +55,15 @@
         "tsConfigPath": "apps/gateway/tsconfig.app.json"
       }
     },
+    "indexer": {
+      "type": "application",
+      "root": "apps/indexer",
+      "entryFile": "main",
+      "sourceRoot": "apps/indexer/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/indexer/tsconfig.app.json"
+      }
+    },
     "kafka-client": {
       "type": "library",
       "root": "libs/kafka-client",

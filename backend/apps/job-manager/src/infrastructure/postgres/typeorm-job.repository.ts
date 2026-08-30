@@ -59,4 +59,3 @@ export class TypeOrmJobRepository implements IJobRepository {
     return entity ? toDomain(entity) : null;
   }
 }
-

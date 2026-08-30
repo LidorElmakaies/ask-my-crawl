@@ -27,7 +27,9 @@ export class JobServiceHttpClient implements IJobServiceClient {
         this.http.request({
           method: 'GET',
           url: `${this.baseUrl}${options.path}`,
-          params: options.queryUserId ? { user_id: options.queryUserId } : undefined,
+          params: options.queryUserId
+            ? { user_id: options.queryUserId }
+            : undefined,
           headers: {
             ...(options.authorizationHeader
               ? { Authorization: options.authorizationHeader }

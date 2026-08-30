@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   KAFKA_TOPICS,
-  type CrawlCompleteMessage,
   type CrawlFrontierMessage,
   type PageScrapedMessage,
 } from '@app/kafka-contracts';
@@ -13,7 +12,6 @@ import {
   PAGE_FETCHER,
   ROBOTS_TXT_CHECKER,
 } from '../tokens';
-import { JOB_KEY_TTL_SECONDS } from '../models/constants';
 import { PermanentFetchError } from '../models/permanent-fetch-error';
 import {
   hostnameOf,
@@ -92,33 +90,9 @@ export class ProcessUrlService implements IProcessUrlUseCase {
       await this.coordinationStore.markFailed(jobId, url);
     }
 
-    const counts = await this.coordinationStore.decrementPendingScrape(jobId);
-    if (counts.pendingScrape > 0 || counts.pendingIndex > 0) {
-      return; // job isn't done yet
-    }
-
-    const wonRace = await this.coordinationStore.tryClaimCompletion(jobId);
-    if (!wonRace) {
-      return; // another component (or, once built, the Indexer) already claimed it
-    }
-
-    const urls = await this.coordinationStore.getCompletionUrls(jobId);
-    const message: CrawlCompleteMessage = {
-      job_id: jobId,
-      user_id: data.user_id,
-      query: data.query,
-      url: stripFragment(data.base_url),
-      succeeded_count: urls.succeededUrls.length,
-      failed_count: urls.failedUrls.length,
-      succeeded_urls: urls.succeededUrls,
-      failed_urls: urls.failedUrls,
-    };
-    await this.eventPublisher.publish(
-      KAFKA_TOPICS.CRAWL_COMPLETE,
-      jobId,
-      message,
-    );
-    await this.coordinationStore.expireJobKeys(jobId, JOB_KEY_TTL_SECONDS);
+    // Only the Indexer's finalizeIndex() checks for job completion and publishes crawl-complete —
+    // see docs/planning/03-crawler-scraper-indexing-plan.md §6.
+    await this.coordinationStore.decrementPendingScrape(jobId);
   }
 
   private async handleHtmlPage(
@@ -171,6 +145,7 @@ export class ProcessUrlService implements IProcessUrlUseCase {
       depth: data.depth,
       scrapedAt: new Date().toISOString(),
       query: data.query,
+      base_url: baseUrl, // propagate-only — the Indexer needs this for its own crawl-complete
     };
     await this.eventPublisher.publish(
       KAFKA_TOPICS.PAGE_SCRAPED,

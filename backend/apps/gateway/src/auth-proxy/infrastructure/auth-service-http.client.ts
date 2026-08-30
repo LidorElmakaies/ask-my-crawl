@@ -50,7 +50,10 @@ export class AuthServiceHttpClient implements IAuthServiceClient {
       return {
         status: 502,
         body: {
-          error: { code: 'auth_service_unreachable', message: axiosErr.message },
+          error: {
+            code: 'auth_service_unreachable',
+            message: axiosErr.message,
+          },
         },
       };
     }

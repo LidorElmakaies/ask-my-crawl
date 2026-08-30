@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { JwtAuthGuard, Roles, RolesGuard } from '@app/auth-kernel';
 import type { Request, Response } from 'express';
 import { AUTH_PROXY_SERVICE } from '../../tokens';

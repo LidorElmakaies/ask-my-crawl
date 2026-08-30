@@ -9,7 +9,9 @@ describe('JobsProxyService', () => {
 
   beforeEach(() => {
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
-    client = { forward: jest.fn().mockResolvedValue({ statusCode: 200, data: [] }) };
+    client = {
+      forward: jest.fn().mockResolvedValue({ statusCode: 200, data: [] }),
+    };
     service = new JobsProxyService(publisher, client);
   });
 

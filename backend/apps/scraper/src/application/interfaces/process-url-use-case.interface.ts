@@ -19,12 +19,10 @@ export interface IProcessUrlUseCase {
    * pending_scrape/succeeded/failed/completion-check itself. */
   handle(data: CrawlFrontierMessage): Promise<void>;
 
-  /** Runs once per URL, after BullMQ has truly finished with it. Marks succeeded/failed,
-   * decrements pending_scrape, and — if this call observes both pending counters at zero and wins
-   * the completion race — publishes `crawl-complete`. Takes the same message `handle()` was
-   * called with (available to the caller as the BullMQ job's own `.data`, unchanged since
-   * enqueue) rather than just `{jobId, url}`, so `crawl-complete`'s `user_id`/`query`/`url`
-   * (=`base_url`) can be read directly from it — no separate Redis-stored job-meta lookup needed. */
+  /** Runs once per URL, after BullMQ has truly finished with it. Marks succeeded/failed and
+   * decrements pending_scrape — nothing more. Only the Indexer's finalizeIndex() checks for job
+   * completion and publishes `crawl-complete` — see
+   * docs/planning/03-crawler-scraper-indexing-plan.md §6. */
   finalizeUrl(
     data: CrawlFrontierMessage,
     outcome: 'succeeded' | 'failed',

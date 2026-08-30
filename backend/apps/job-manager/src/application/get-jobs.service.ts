@@ -1,4 +1,9 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Job } from '../models/job';
 import { JOB_REPOSITORY } from '../tokens';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';

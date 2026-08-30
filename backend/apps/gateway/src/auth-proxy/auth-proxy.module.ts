@@ -10,7 +10,11 @@ import { AUTH_PROXY_SERVICE, AUTH_SERVICE_CLIENT } from '../tokens';
 
 @Module({
   imports: [HttpModule, AuthKernelModule],
-  controllers: [AuthProxyController, MeProxyController, AdminUsersProxyController],
+  controllers: [
+    AuthProxyController,
+    MeProxyController,
+    AdminUsersProxyController,
+  ],
   providers: [
     { provide: AUTH_PROXY_SERVICE, useClass: AuthProxyService },
     { provide: AUTH_SERVICE_CLIENT, useClass: AuthServiceHttpClient },

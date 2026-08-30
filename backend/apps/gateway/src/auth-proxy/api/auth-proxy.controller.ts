@@ -19,7 +19,11 @@ export class AuthProxyController {
   async register(@Body() body: unknown, @Res() res: Response): Promise<void> {
     writeProxyResponse(
       res,
-      await this.proxy.forward({ method: 'POST', path: '/auth/register', body }),
+      await this.proxy.forward({
+        method: 'POST',
+        path: '/auth/register',
+        body,
+      }),
     );
   }
 

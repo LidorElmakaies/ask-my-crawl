@@ -1,4 +1,7 @@
-import type { ForwardQueryOptions, ProxyResponse } from '../../application/interfaces/jobs-proxy-service.interface';
+import type {
+  ForwardQueryOptions,
+  ProxyResponse,
+} from '../../application/interfaces/jobs-proxy-service.interface';
 
 /**
  * Infrastructure layer interface. Implemented by JobServiceHttpClient.

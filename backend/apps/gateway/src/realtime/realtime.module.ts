@@ -19,4 +19,3 @@ import { CONNECTION_STORE, REALTIME_CONNECTION_SERVICE } from '../tokens';
   ],
 })
 export class RealtimeModule {}
-

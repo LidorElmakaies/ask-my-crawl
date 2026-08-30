@@ -11,4 +11,5 @@ export interface PageScrapedMessage {
   depth: number; // remaining-hops budget at the time this page was scraped, see crawl-frontier-message.ts
   scrapedAt: string; // ISO8601
   query: string; // propagate-only, same as on crawl-frontier
+  base_url: string; // propagate-only, same as on crawl-frontier — the job's seed URL
 }

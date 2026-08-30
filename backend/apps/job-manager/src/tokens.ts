@@ -7,4 +7,3 @@ export const SAVE_JOB_RESULT_USE_CASE = Symbol('ISaveJobResultUseCase');
 export const GET_JOBS_USE_CASE = Symbol('IGetJobsUseCase');
 export const JOB_REPOSITORY = Symbol('IJobRepository');
 export const EVENT_PUBLISHER = Symbol('IEventPublisher');
-

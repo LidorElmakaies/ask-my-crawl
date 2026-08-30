@@ -84,7 +84,11 @@ describe('Auth proxy (e2e)', () => {
     it('relays a 4xx error response verbatim, not reshaped', async () => {
       nextResponse = {
         status: 409,
-        body: { message: 'Email is already registered', error: 'Conflict', statusCode: 409 },
+        body: {
+          message: 'Email is already registered',
+          error: 'Conflict',
+          statusCode: 409,
+        },
       };
 
       const res = await request(server)
@@ -159,7 +163,9 @@ describe('Auth proxy (e2e)', () => {
 
     it('forwards for a valid admin token', async () => {
       const t = token('admin');
-      await request(server).get('/admin/users').set('Authorization', `Bearer ${t}`);
+      await request(server)
+        .get('/admin/users')
+        .set('Authorization', `Bearer ${t}`);
 
       expect(recordedRequests[0]).toMatchObject({
         method: 'GET',

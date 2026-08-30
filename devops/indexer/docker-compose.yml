@@ -1,0 +1,44 @@
+services:
+  indexer:
+    extends:
+      file: ../common.yml
+      service: _defaults
+    build:
+      context: ../../backend
+      dockerfile: apps/indexer/Dockerfile
+    env_file:
+      - ../../backend/.env
+    environment:
+      # Overrides the .env file's localhost-based defaults — container-to-container calls use
+      # service names, not localhost. REDIS_URL/SEAWEEDFS_ENDPOINT match the Scraper's own
+      # overrides exactly — one shared Redis instance, one shared SeaweedFS instance.
+      - REDIS_URL=redis://redis:6379
+      - SEAWEEDFS_ENDPOINT=http://seaweedfs:8333
+      - VECTOR_DB_URL=http://qdrant:6333
+      # EMBEDDING_BASE_URL is provider-agnostic (see backend/.env.example) — this points it at a
+      # local LM Studio instance specifically, since that's this deployment's current provider.
+      # LM Studio isn't containerized (a desktop app on the host) — host.docker.internal is Docker
+      # Desktop's own DNS name for the host machine (Windows/Mac; see the devops agent for the
+      # Linux equivalent if this ever runs there).
+      - EMBEDDING_BASE_URL=http://host.docker.internal:1234/v1
+      # OpenTelemetry — service.name must be unique per service; the collector lives on the
+      # shared `observability` network (see the root docker-compose.yml's networks: block).
+      - OTEL_SERVICE_NAME=indexer
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+    # No ports: — Kafka-only microservice, no HTTP surface. Same reasoning as job-manager/scraper.
+    extra_hosts:
+      # Required for host.docker.internal to resolve on Linux Docker hosts — a no-op on Docker
+      # Desktop (Windows/Mac), which already provides it natively.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      seaweedfs:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - askmycrawl
+      - observability

@@ -18,4 +18,3 @@ export interface IJobRepository {
   findAll(filterUserId?: string): Promise<Job[]>;
   findById(jobId: string): Promise<Job | null>;
 }
-

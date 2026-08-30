@@ -20,4 +20,3 @@ import { ToolProxyModule } from './tool-proxy/tool-proxy.module';
   ],
 })
 export class GatewayModule {}
-
