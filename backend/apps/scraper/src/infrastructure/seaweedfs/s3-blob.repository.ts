@@ -3,9 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { IBlobRepository } from '../interfaces/blob-repository.interface';
 
-// SeaweedFS's S3-compatible API, via the real AWS SDK — this is also what makes a later swap to
-// real AWS S3 a config change (new endpoint/credentials), not a rewrite. See the devops agent's
-// AWS-phase table.
+// SeaweedFS's S3-compatible API — swapping to real AWS S3 later is a config change, not a rewrite.
 @Injectable()
 export class S3BlobRepository implements IBlobRepository {
   private readonly client: S3Client;
@@ -23,9 +21,7 @@ export class S3BlobRepository implements IBlobRepository {
         accessKeyId: config.get<string>('SEAWEEDFS_ACCESS_KEY') ?? '',
         secretAccessKey: config.get<string>('SEAWEEDFS_SECRET_KEY') ?? '',
       },
-      // Required for S3-compatible non-AWS endpoints — virtual-hosted-style bucket URLs
-      // (bucket.endpoint/...) don't resolve against SeaweedFS, only path-style (endpoint/bucket/...).
-      forcePathStyle: true,
+      forcePathStyle: true, // SeaweedFS only resolves path-style bucket URLs
     });
   }
 

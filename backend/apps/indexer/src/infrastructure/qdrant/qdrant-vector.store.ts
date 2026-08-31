@@ -8,16 +8,10 @@ import type {
   VectorChunk,
 } from '../interfaces/vector-store.interface';
 
-// @qdrant/js-client-rest — self-hosted vector DB, per docs/specs/data-model.md's schema (HNSW +
-// COSINE, fixed, not configurable). Single-container deployment (devops/qdrant/docker-compose.yml)
-// — replaced Milvus's real 3-container etcd+MinIO+standalone topology; verified directly against
-// Qdrant's own API reference rather than assumed. Point IDs must be a uint64 or a valid UUID
-// (arbitrary strings are rejected by Qdrant) — randomUUID() per chunk on every upsert; stable IDs
-// across re-indexes aren't needed since deleteByUrl always runs first. VECTOR_DB_URL/
-// VECTOR_DB_COLLECTION are named for the role, not the vendor — same reasoning as
-// EMBEDDING_BASE_URL: swapping vector DBs still means writing a new class (unlike the embedding
-// client's genuine drop-in provider-agnosticism), but nothing forces the config surface to
-// advertise today's concrete choice either.
+// @qdrant/js-client-rest. Schema (HNSW + COSINE) and deployment: docs/specs/data-model.md,
+// docs/planning/03-crawler-scraper-indexing-plan.md §7. Point IDs must be a uint64 or a valid
+// UUID — randomUUID() per chunk on every upsert, no need for stability since deleteByUrl always
+// runs first.
 @Injectable()
 export class QdrantVectorStore implements IVectorStore {
   private readonly client: QdrantClient;
@@ -35,14 +29,11 @@ export class QdrantVectorStore implements IVectorStore {
   }
 
   async ensureCollection(): Promise<void> {
-    // Cheap in-process guard so a hot path doesn't re-check collectionExists on every single page —
-    // safe because collections aren't dropped at runtime by anything in this system.
+    // In-process guard — collections aren't dropped at runtime by anything in this system.
     if (this.ensured) return;
 
     const { exists } = await this.client.collectionExists(this.collectionName);
     if (!exists) {
-      // Qdrant builds its HNSW/COSINE index as part of collection creation and the collection is
-      // immediately queryable — no separate createIndex/loadCollection step, unlike Milvus.
       await this.client.createCollection(this.collectionName, {
         vectors: { size: this.dimension, distance: 'Cosine' },
       });

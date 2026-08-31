@@ -6,10 +6,8 @@ import { INDEXING_USE_CASE } from '../tokens';
 import { PermanentIndexError } from '../models/permanent-index-error';
 import type { IIndexingUseCase } from '../application/interfaces/indexing-use-case.interface';
 
-// The `index-page` BullMQ worker — an inbound trigger, same tier as a Kafka @EventPattern
-// consumer. Mirrors the Scraper's ProcessUrlWorker exactly, including the finality check: see
-// IIndexingUseCase's doc comment for why finalizeIndex() has to be called from the
-// 'completed'/'failed' event handlers and not from process() itself.
+// Mirrors the Scraper's ProcessUrlWorker, including the finality check — see IIndexingUseCase's
+// doc comment for why finalizeIndex() is called from the event handlers, not process().
 @Processor('index-page')
 export class IndexingWorker extends WorkerHost {
   private readonly logger = new Logger(IndexingWorker.name);
@@ -42,9 +40,7 @@ export class IndexingWorker extends WorkerHost {
     this.logger.warn(
       `index-page attempt failed for job_id=${job.data.job_id} url=${job.data.normalizedUrl}: ${err.message}`,
     );
-    // Same BullMQ semantics as ProcessUrlWorker: 'failed' fires on EVERY attempt, not just the
-    // final one — only finalize once attemptsMade has actually reached the configured limit, or
-    // an UnrecoverableError fired (which always means final regardless of attempt count).
+    // 'failed' fires on every attempt, not just the final one.
     const attemptsMade = job.attemptsMade;
     const maxAttemptsForJob = job.opts.attempts ?? 1;
     const isFinal =

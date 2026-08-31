@@ -1,21 +1,12 @@
-# Scraper / Indexer — Design Plan
+# Scraper / Indexer — Design
 
-> Status: reconstructed 2026-08-28. Every other spec (`services.md`, `data-model.md`,
-> `event-schemas.md`, `backend-architecture.md`, the `devops` agent) has pointed at this file as
-> "the full mechanism" since 2026-08-26, but it never actually got written/committed — this is that
-> doc, assembled from the consistent fragments scattered across those files plus a round of open
-> decisions closed out directly with the user on 2026-08-28. Referenced from
-> [`01-architecture-notes.md` §5](01-architecture-notes.md).
->
-> **Build scope for this pass was Scraper only** (§1–§6 below) — **implemented and verified
-> 2026-08-28** (`backend/apps/scraper`): a real crawl of `info.cern.ch` produced 24 succeeded pages
-> (real blobs in SeaweedFS, real `page-scraped` messages), 1 correctly-classified permanent failure
-> (404, no wasted retries), and a real `crawl-complete` summary; a separate test against an
-> unreachable host confirmed the transient-failure path genuinely retries
-> `SCRAPER_FETCH_MAX_ATTEMPTS` times before giving up. The Indexer (§7) is documented here in full
-> because it's the other half of the shared Redis/completion-detection design and every other spec
-> already points at this file for it too — but it is **still not implemented**. Don't start Indexer
-> code from this doc without confirming scope has actually expanded.
+Full mechanism for the two services that turn a job's seed URL into indexed, searchable chunks: the
+**Scraper** (§1–§6) and the **Indexer** (§7). Referenced from `services.md`, `data-model.md`,
+`event-schemas.md`, and `backend-architecture.md` as "the full mechanism" for both.
+
+Both are implemented and working end to end — a submitted job gets crawled, scraped, chunked,
+embedded, and stored in Qdrant. What's still missing is Query/Answer Service reading it back out to
+produce an answer (see `services.md`).
 
 ## 1. Shape
 
@@ -41,13 +32,11 @@ producers and BullMQ enqueue calls are Infrastructure-layer everywhere (`IEventP
 `IProcessUrlQueue`/`IIndexPageQueue`); Kafka consumers and BullMQ workers are API-layer — per
 `backend-architecture.md`, not re-litigated here.
 
-## 2. URL handling — decided 2026-08-28
+## 2. URL handling
 
-**No general URL normalization.** An earlier draft of this doc proposed stripping query strings —
-rejected directly: *"i dont think i need to normalize it... it was to remove ?... and #.... but
-its incorrect it makes my crawl less currect"* — a different `?query=...` string can legitimately
-serve different content, so stripping it would cause the crawler to conflate genuinely different
-pages.
+**No general URL normalization.** A different `?query=...` string can legitimately serve different
+content, so query strings (and everything else about the URL — host casing, trailing slash) pass
+through untouched; normalizing them would risk conflating genuinely different pages.
 
 **Exception: the URL fragment (`#...`) is stripped**, and only the fragment. A fragment is never
 sent to the server — `page.html#foo` and `page.html#bar` produce the byte-identical HTTP response —
@@ -60,19 +49,14 @@ function stripFragment(url: string): string {
 }
 ```
 
-This is the only transform applied before:
-- computing the Redis dedup key (`SADD crawl:{job_id}:visited`)
-- computing the SeaweedFS blob key (`sha256(stripFragment(url))`)
+This is the only transform applied before computing the Redis dedup key
+(`SADD crawl:{job_id}:visited`) and the SeaweedFS blob key (`sha256(stripFragment(url))`).
 
-Everything else about the URL string (query params, host casing, trailing slash) passes through
-untouched.
-
-## 3. Same-domain link filter — decided 2026-08-28
+## 3. Same-domain link filter
 
 "Same-domain" ignores a leading `www.` on either side of the comparison — `www.example.com` and
 `example.com` are the same domain. No broader subdomain folding (`blog.example.com` is a
-**different** domain from `example.com`) — narrowest change from plain hostname matching, decided
-directly over the alternative (any-subdomain-counts-as-same-site).
+**different** domain from `example.com`).
 
 ```ts
 function sameDomain(a: string, b: string): boolean {
@@ -126,8 +110,8 @@ use case; the steps below are that use case's logic.
    Retrying a "this page doesn't exist" response wastes the attempt budget on something that will
    never succeed.
 4. **Terminal failure (either kind)**: `SADD job:{job_id}:failed <url>`, decrement
-   `job:{job_id}:pending_scrape`, run completion check (§6), stop — no children expansion for a
-   page that was never fetched.
+   `job:{job_id}:pending_scrape` (no completion check here — see §6), stop — no children expansion
+   for a page that was never fetched.
 5. **On success**, branch on the response's `Content-Type` — a switch/strategy dispatch, not an
    if/else, so adding a new content type later is one new case, not a rewrite:
    ```ts
@@ -140,14 +124,14 @@ use case; the steps below are that use case's logic.
        return handleUnsupportedContentType(url, 'unknown', ctx); // stub, not implemented
    }
    ```
-   `handleUnsupportedContentType` is a **deliberate stub** for now — decided 2026-08-28 to leave the
-   extension point in place rather than hardcode "only HTML exists." Its actual behavior (skip
-   silently? save the raw blob anyway without indexing? mark failed?) is not decided — when a real
-   need for a second content type shows up, implement it there and update this doc, don't leave the
-   stub throwing in production.
+   `handleUnsupportedContentType` is a **deliberate stub**: the extension point exists rather than
+   hardcoding "only HTML exists," but its actual behavior (skip silently? save the raw blob anyway
+   without indexing? mark failed?) isn't decided — implement it for real when a second content type
+   is actually needed, don't leave the stub throwing in production.
 6. `handleHtmlPage` (the only implemented branch):
-   a. `blobKey = sha256(stripFragment(url))`; save the raw HTML body to SeaweedFS at that key
-      (bucket/access details: §8).
+   a. `blobKey = sha256(stripFragment(url))`; save the raw HTML body to SeaweedFS at that key.
+      SeaweedFS's S3 API is wire-compatible with `@aws-sdk/client-s3`, so it's a config change (not
+      a rewrite) to point the same adapter at real AWS S3 later.
    b. Parse the HTML, extract outbound `<a href>` links.
    c. Filter: same-domain only (§3, against the job's `base_domain`), and only if `depth - 1 > 0`
       i.e. don't bother producing children once the next hop would already be past the budget —
@@ -157,31 +141,43 @@ use case; the steps below are that use case's logic.
       key `url_hash` per `event-schemas.md`). No dedup check here — that's Frontier Consumer's job
       (§4) when it consumes this same message back.
    e. Publish `page-scraped` (`{job_id, user_id, url, normalizedUrl: stripFragment(url), blobKey,
-      depth, scrapedAt, query}`, partition key `url_hash` — decided 2026-08-28, spreads Indexer
-      load evenly across partitions; no per-job ordering is needed since each message indexes one
-      independent page).
-   f. `SADD job:{job_id}:succeeded <url>`, decrement `job:{job_id}:pending_scrape`, run completion
-      check (§6).
+      depth, scrapedAt, query, base_url}`, partition key `url_hash` — spreads Indexer load evenly
+      across partitions; no per-job ordering is needed since each message indexes one independent
+      page). `base_url` rides this message too, same reasoning as §4 — `crawl-complete`'s `url`
+      field must always mean the job's seed URL, and the Indexer is the one that eventually
+      publishes it.
+   f. `SADD job:{job_id}:succeeded <url>`, decrement `job:{job_id}:pending_scrape` (no completion
+      check here — see §6).
 
 ## 6. Completion detection
 
-After **either** side (a Scraper Worker finishing §5, or an Indexer Indexing Worker finishing its
-own equivalent step — §7) decrements its own pending counter, it checks:
+**Only the Indexer's Indexing Worker checks for job completion or publishes `crawl-complete`** — the
+Scraper's own decrement (§5 step 4/6f) never checks `pending_index` or checks for completion at all.
+This is necessary, not just simpler: `page-scraped`'s delivery from the Scraper to the Indexer is
+asynchronous (produce now, consumed whenever the Indexer's Kafka consumer gets to it), so a
+Scraper-side completion check could observe `pending_index` as 0 simply because the Indexer hasn't
+incremented it yet for that page, not because indexing is actually done — for a single-page job
+(depth 1, no child links), with no other scrape work to provide a buffer, that would fire
+`crawl-complete` before the page is even queued for indexing. The job isn't done until it's actually
+indexed and searchable, not merely scraped, so only the side that knows indexing is finished may
+declare completion.
+
+After an Indexing Worker finishes its own step (§7) and decrements `pending_index`, it checks:
 
 ```ts
 if (pending_scrape === 0 && pending_index === 0) {
   const wonRace = await redis.set(`job:${job_id}:notified`, '1', { NX: true });
   if (wonRace) {
-    // this component (whichever one observed the zero-zero state and won the SET NX) publishes
-    // crawl-complete — build the payload from job:{job_id}:succeeded / :failed
+    // publish crawl-complete — build the payload from job:{job_id}:succeeded / :failed
   }
 }
 ```
 
-`SET NX` is the exactly-once guard — both a Scraper Worker and an Indexing Worker could observe
-zero-zero for the same job at nearly the same moment (a job's last page finishes scraping and
-indexing close together), only one of them wins the `SET`, only that one publishes `crawl-complete`.
-The winner reads `job:{job_id}:succeeded`/`:failed` (Sets) to build the full payload:
+`SET NX` still guards exactly-once delivery even with a single caller: at-least-once Kafka
+redelivery of the same `page-scraped` message could otherwise decrement `pending_index` twice for
+one page, letting two different Indexing Worker calls both observe zero-zero for the same job. Only
+the one that wins the `SET` publishes `crawl-complete`. The winner reads
+`job:{job_id}:succeeded`/`:failed` (Sets) to build the full payload:
 
 ```jsonc
 {
@@ -200,62 +196,56 @@ matching `event-schemas.md`'s `crawl-complete` shape. After publishing, `EXPIRE`
 `job:{job_id}:*` key with a ~1 hour TTL (not an immediate `DEL`) — leaves a short post-completion
 inspection window, no indefinite growth.
 
-## 7. Indexer (design carried over, not being built this pass)
+## 7. Indexer
 
-Mirrors the Scraper's shape — documented here since it shares this file, this pipeline's Kafka
-topics, and the Redis coordination state, but **out of scope for the current implementation pass**.
+Mirrors the Scraper's shape, per this file's own §1 diagram and Redis coordination state.
 
 - **Index Intake Consumer** (API layer) — consumes `page-scraped`, bridges each message onto
   `index-page` (BullMQ), same Kafka→BullMQ bridge pattern as the Frontier Consumer. On enqueue:
-  `INCR job:{job_id}:pending_index`.
+  `INCR job:{job_id}:pending_index`. No dedup gate — unlike `crawl-frontier`'s messages, a
+  `page-scraped` message is never a rediscovery of an already-seen URL, so there's nothing to dedup
+  against (at-least-once Kafka redelivery double-counting `pending_index` is a known, accepted
+  POC-level gap, not solved here).
 - **Indexing Worker(s)** (API layer, BullMQ workers on `index-page`) — fetch the raw HTML blob from
-  SeaweedFS by `blobKey`, clean it (LangChain document transformer), chunk it
-  (`RecursiveCharacterTextSplitter`), embed it (LM Studio's OpenAI-compatible API via
-  `OpenAIEmbeddings` from `@langchain/openai`), delete any stale vectors for that `url` from Milvus,
-  upsert the new chunks. Then decrement `job:{job_id}:pending_index` and run the same completion
-  check (§6).
-- Milvus collection schema, embedding dimension, retry policy for the index stage, and the
-  Query/Answer retrieval API are all still open — see `data-model.md` and `services.md`'s Indexer
-  section. Not addressed further here; revisit when Indexer implementation actually starts.
+  SeaweedFS by `blobKey`, strip it to plain text (`cheerio`), chunk it
+  (`RecursiveCharacterTextSplitter` from `@langchain/textsplitters`, 1000/200 size/overlap — an
+  unremarkable starting point, not tuned against real answer quality yet), embed it (any
+  OpenAI-compatible embedding server via `OpenAIEmbeddings` from `@langchain/openai`, currently a
+  self-hosted LM Studio instance — swappable via `EMBEDDING_BASE_URL`, no code change), delete any
+  stale vectors for that `url` from Qdrant, upsert the new chunks. Then decrement
+  `job:{job_id}:pending_index` and run the same completion check (§6) — using its own scoped copy of
+  the Redis coordination logic, not the Scraper's (see `data-model.md`'s Redis section for why these
+  stay independent copies).
+- **Qdrant collection schema**: 768-dim vector field (`text-embedding-nomic-embed-text-v1.5` by
+  default, both env-configurable), `HNSW`/`COSINE` index (built automatically as part of collection
+  creation), payload fields `job_id`/`user_id`/`url`/`query`/`chunk_index`/`scraped_at`/`text` (the
+  chunk's own content — Query/Answer Service needs the real text back from a similarity search, not
+  just a vector). Point IDs are a fresh `randomUUID()` per chunk on every upsert (Qdrant rejects
+  arbitrary strings — a uint64 or a valid UUID only); stable IDs across re-indexes aren't needed
+  since delete-by-`url` always runs first. Full detail: `data-model.md`.
+- **Vector DB is Qdrant** — single container, no external metadata/object-storage dependency
+  (originally built against Milvus, which genuinely needs its own etcd+MinIO; replaced once that
+  topology proved unwarranted for this project's scale). `IVectorStore` is an interface
+  (`backend-architecture.md`'s layering), so a future swap would touch only the one Infrastructure
+  adapter. The official `qdrant/qdrant` image deliberately ships without `curl`/`wget` (a security
+  choice upstream — `github.com/qdrant/qdrant/issues/4250`), so its Docker healthcheck uses a
+  `/dev/tcp` bash redirection instead — Qdrant's own reference compose file uses the identical
+  command.
+- **A real integration quirk to know about before touching this code**: LM Studio's
+  `/v1/embeddings` endpoint silently returns a truncated vector (192 values instead of 768) when
+  asked for `encoding_format: "base64"` — the `openai` SDK's own default request shape — instead of
+  erroring. Forcing `encodingFormat: 'float'` on `OpenAIEmbeddings`'s constructor bypasses the broken
+  path entirely; fixed in `apps/indexer/src/infrastructure/langchain/openai-embedding.client.ts`.
+- **Retry policy for the index stage**: `INDEXER_MAX_ATTEMPTS` (default 3), same exponential-backoff
+  shape as the Scraper's `SCRAPER_FETCH_MAX_ATTEMPTS`. Permanent vs. transient classification: a
+  missing blob, unparseable HTML, or a persistent embedding-dimension mismatch are permanent
+  (`PermanentIndexError` → BullMQ's `UnrecoverableError`, no retry); a SeaweedFS/LM Studio/Qdrant
+  connection failure is transient (plain `Error`, retried).
+- **Still not designed**: the Query/Answer retrieval API (a Qdrant similarity search scoped to a
+  `job_id`) — see `data-model.md` and `services.md`'s Indexer section.
 
-## 8. Infra additions needed (devops)
+## 8. Open items (not blocking, not decided)
 
-None of these exist in `devops/` yet — added as part of this same pass since the Scraper can't run
-without them:
-
-- **`devops/redis/docker-compose.yml`** — one instance, shared by Scraper and (later) Indexer.
-  Backs BullMQ's `process-url` queue and every `job:{job_id}:*` key above. No persistence
-  requirement beyond BullMQ's own durability needs (job coordination state is inherently
-  short-lived — TTL'd after completion per §6).
-- **`devops/seaweedfs/docker-compose.yml`** — single filer+volume node with the S3 API gateway
-  enabled (SeaweedFS ships this built in — `weed server -s3`). Bucket: `askmycrawl-raw-html`.
-  Object key = the `blobKey` (the raw hash string, no prefix). Access key/secret sourced from
-  `devops/.env` (new vars, never baked into an image — per the `devops` agent's non-negotiables),
-  consumed by the Scraper via env vars (`SEAWEEDFS_ENDPOINT`, `SEAWEEDFS_ACCESS_KEY`,
-  `SEAWEEDFS_SECRET_KEY`, `SEAWEEDFS_BUCKET`). SeaweedFS's S3 API is deliberately
-  wire-compatible with the AWS S3 SDK, so the Scraper's blob-storage adapter can use `@aws-sdk/
-  client-s3` pointed at the SeaweedFS endpoint — this is also what makes "swap for real AWS S3
-  later" a config change, not a rewrite, matching the AWS-phase table in the `devops` agent.
-- **`page-scraped` Kafka topic** — add to `kafka-init`'s topic list (`devops/kafka/docker-
-  compose.yml`). Partition count: TBD at creation time (event-schemas.md leaves it open; not
-  blocking, pick something reasonable like 6 to match `crawl-frontier`'s spread when actually wiring
-  this up). Retention: 1 day, matching every other topic in the pipeline.
-- **`SCRAPER_FETCH_MAX_ATTEMPTS`** — new env var, default `3` if unset (`devops/.env.example` gets a
-  documented entry).
-
-## 9. `kafka-contracts` fixes needed before coding the Scraper
-
-- **Add `page-scraped-message.ts`** (`PageScrapedMessage` interface, matching §5e's payload above)
-  — doesn't exist yet, flagged as missing in `CLAUDE.md`.
-- **Fix `crawl-complete-message.ts`** — currently just `{job_id, user_id, query}`; needs to grow to
-  match §6's payload (`url`, `succeeded_count`, `failed_count`, `succeeded_urls`, `failed_urls`).
-
-## 10. Open items carried forward (not blocking, not decided here)
-
-- Exact BullMQ backoff base delay (implemented as proposed: 5s, exponential — cheap to change, not
-  wired to an env var since only the attempt count was asked to be configurable).
 - `handleUnsupportedContentType`'s real behavior (§5 step 5) — implemented as a deliberate stub,
   throws `PermanentFetchError('... not implemented')`. Still not decided what it should actually do.
-- Per-domain rate limiting — not implemented, not even a stub/interface. Still open, deferred.
-- Redis TTL's exact value — implemented as 60 minutes (`JOB_KEY_TTL_SECONDS`,
-  `backend/apps/scraper/src/models/constants.ts`), matching `data-model.md`'s "~1 hour" language.
+- Per-domain rate limiting — not implemented, not even a stub/interface.

@@ -1,11 +1,6 @@
-// Every backend app needs at least one log line per HTTP request — without it, only bootstrap
-// chatter ("Nest application successfully started", route mapping) ever reaches Loki, and there's
-// nothing to correlate a trace back to (see OtelLogger's trace_id wiring, which only has anything
-// to attach to if a log call happens while a request's span is active).
-//
-// A plain Express-style middleware, not a NestJS interceptor — this needs to run identically in
-// every app (gateway, auth, future services) with zero per-app wiring beyond one `app.use(...)`
-// line, and it has no dependency on Nest's DI container.
+// One log line per HTTP request — without it, nothing gives OtelLogger's trace_id wiring anything
+// to attach to. Plain Express middleware, not a Nest interceptor, so it needs zero per-app wiring
+// beyond one app.use(...) line.
 
 import type { NextFunction, Request, Response } from 'express';
 import type { LoggerService } from '@nestjs/common';

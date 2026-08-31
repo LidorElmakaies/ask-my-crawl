@@ -6,9 +6,8 @@ import type { ICoordinationStore } from '../infrastructure/interfaces/coordinati
 import type { IProcessUrlQueue } from '../infrastructure/interfaces/process-url-queue.interface';
 import type { IFrontierIntakeUseCase } from './interfaces/frontier-intake-use-case.interface';
 
-// Frontier Consumer's use case — the single authoritative dedup gate. Handles both the seed
-// message (from Job Manager Service) and every child URL the Scraper Worker re-publishes, on the
-// same crawl-frontier topic. See docs/planning/03-crawler-scraper-indexing-plan.md §4.
+// The single authoritative dedup gate — handles both the seed message and every re-published
+// child URL. See docs/planning/03-crawler-scraper-indexing-plan.md §4.
 @Injectable()
 export class FrontierIntakeService implements IFrontierIntakeUseCase {
   constructor(
@@ -24,11 +23,7 @@ export class FrontierIntakeService implements IFrontierIntakeUseCase {
       message.job_id,
       url,
     );
-    if (!isNew) {
-      // Redelivery of an already-seen URL (Kafka at-least-once, a consumer restart, ...) — the
-      // dedup gate makes this a harmless no-op, not an error.
-      return;
-    }
+    if (!isNew) return; // redelivery of an already-seen URL — harmless no-op
 
     await this.coordinationStore.incrementPendingScrape(message.job_id);
     await this.queue.enqueue({ ...message, url });

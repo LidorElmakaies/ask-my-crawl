@@ -37,12 +37,20 @@ backend/
                           # crawl-complete). Verified end-to-end against a real crawl. See
                           # docs/planning/03-crawler-scraper-indexing-plan.md for the full design
                           # this implements.
-    indexer/              # not implemented — owns embedding/vector storage (Milvus + SeaweedFS,
-                          # not Postgres). Index Intake Consumer (page-scraped in) + Indexing
-                          # Worker(s) (BullMQ `index-page`: clean, chunk, embed via LM Studio,
-                          # upsert to Milvus). Same planning doc — reuses the Scraper's existing
+    indexer/              # implemented — Index Intake Consumer (@EventPattern('page-scraped'),
+                          # bridges onto BullMQ's index-page queue) + IndexingWorker (BullMQ
+                          # worker: fetch blob from SeaweedFS, strip HTML to text via cheerio,
+                          # chunk via @langchain/textsplitters, embed via LM Studio
+                          # (@langchain/openai's OpenAIEmbeddings), delete stale Qdrant vectors for
+                          # the URL, upsert the new ones, and — on observing job completion —
+                          # publish crawl-complete, the only service that ever does). Own scoped
+                          # copies of ICoordinationStore/IBlobRepository (see
+                          # redis-coordination.store.ts's doc comment for why these are per-service,
+                          # not shared, unlike the Kafka publisher). Reuses the Scraper's existing
                           # Redis/SeaweedFS instances (devops.md's "reuse shared infrastructure"
-                          # rule), doesn't provision its own.
+                          # rule); Qdrant is the one genuinely new piece of shared infra this app
+                          # introduces. See docs/planning/03-crawler-scraper-indexing-plan.md for the
+                          # full design.
     query-answer/
     notification/
   libs/
@@ -53,12 +61,26 @@ backend/
     kafka-contracts/     # implemented — topic + typed payload constants for every topic in
                           # event-schemas.md (job-requests/crawl-frontier/job-created/
                           # answer-ready/result-saved/crawl-complete/page-scraped), matching it
-                          # exactly. Imported by Job Manager Service and the Scraper today.
-                          # `crawl-complete-message.ts` now carries the full result-summary
-                          # shape (succeeded/failed counts + URL lists), not the old thin
+                          # exactly. Imported by every Kafka producer/consumer today (Gateway,
+                          # Job Manager Service, the Scraper, the Indexer). `page-scraped-message.ts`
+                          # carries a `base_url` field (propagate-only, same pattern as
+                          # crawl-frontier's) added when the Indexer was built — its own
+                          # crawl-complete needs the job's seed URL, not just the individual page's.
+                          # `crawl-complete-message.ts` carries the full result-summary shape
+                          # (succeeded/failed counts + URL lists), not the old thin
                           # {job_id, user_id, query} trigger — kept in sync when the Scraper was
                           # built. Every future Kafka producer/consumer should import from here
                           # instead of redefining shapes.
+    kafka-client/        # implemented — IEventPublisher + KafkajsEventPublisher, a single shared
+                          # raw-kafkajs producer wrapper used by Gateway, Job Manager Service, the
+                          # Scraper, and the Indexer (clientId is a constructor parameter, supplied
+                          # per-service via a `useFactory` binding in each app's own module — see
+                          # kafkajs-event-publisher.ts). Extracted from 3 byte-identical per-service
+                          # copies once a 4th consumer (the Indexer) made the duplication real
+                          # instead of hypothetical — this is the one piece of infra glue this
+                          # project actually shares across services; see the Indexer's own
+                          # ICoordinationStore/IBlobRepository for the contrasting "stays
+                          # per-service" case and why.
     dtos/                 # implemented — Auth's request DTOs + UserResponseDto. The test isn't
                           # "does the frontend send this," it's "does more than one service's
                           # code need to agree on this shape" — Auth Service implements
@@ -72,12 +94,17 @@ backend/
 NestJS integration, wired in `scraper.module.ts` via `BullModule.forRootAsync`/`registerQueue`),
 `ioredis` (the coordination-store client, used directly — there's no NestJS wrapper for arbitrary
 Redis commands the way `@nestjs/bullmq` wraps queues), `cheerio` (HTML link extraction),
-`@aws-sdk/client-s3` (SeaweedFS, S3-compatible, `forcePathStyle: true`). **The Indexer will still
-need**, when it's built: `@zilliz/milvus2-sdk-node` (Milvus), `@langchain/openai`
-(`OpenAIEmbeddings` against LM Studio's local server), `@langchain/community` (HTML cleaning),
-`@langchain/textsplitters` (`RecursiveCharacterTextSplitter`) — don't add these speculatively
-before actually building it. Full design:
-`docs/planning/03-crawler-scraper-indexing-plan.md`.
+`@aws-sdk/client-s3` (SeaweedFS, S3-compatible, `forcePathStyle: true`). **The Indexer's own
+dependencies** (same `@nestjs/bullmq`/`ioredis`/`@aws-sdk/client-s3` trio, plus): `cheerio` again
+— reused for HTML→text extraction instead of pulling in `@langchain/community`'s heavier HTML
+document transformer for one utility (a deliberate deviation from the original plan doc's vague
+wording, made when this was actually built); `@langchain/textsplitters`
+(`RecursiveCharacterTextSplitter`); `@langchain/openai` (`OpenAIEmbeddings`, pointed at any
+OpenAI-compatible embedding server via `EMBEDDING_BASE_URL` — provider-agnostic by design, currently
+a self-hosted LM Studio instance); `@qdrant/js-client-rest` (Qdrant).
+**`@langchain/community` was deliberately never added** — don't add it speculatively for a "cleaner"
+HTML transformer; cheerio already does the job with a dependency this project already has. Full
+design: `docs/planning/03-crawler-scraper-indexing-plan.md`.
 
 **BullMQ semantics that shape the Scraper's retry logic**: a job processor's function runs once
 per *attempt*, not once per URL — the `'failed'` event fires on *every* failed attempt, not just
@@ -138,7 +165,7 @@ is built on. Key points to keep front of mind while coding (full detail in the s
    reasoning behind a decision.
 8. `docs/planning/03-crawler-scraper-indexing-plan.md` — the full Scraper/Indexer mechanism
    (Frontier Consumer, Scraper Worker, Index Intake Consumer, Indexing Worker, Redis keys, BullMQ
-   queues, Milvus schema) — read this in full before writing a single file in either `apps/scraper`
+   queues, Qdrant schema) — read this in full before writing a single file in either `apps/scraper`
    or `apps/indexer`; `services.md`/`event-schemas.md`/`data-model.md` only summarize it.
 
 ## Non-negotiables

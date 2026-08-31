@@ -4,17 +4,10 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 import { PermanentIndexError } from '../../models/permanent-index-error';
 import type { IEmbeddingClient } from '../interfaces/embedding-client.interface';
 
-// Provider-agnostic: anything that speaks the OpenAI-compatible /v1/embeddings API works here
-// unmodified, just by pointing EMBEDDING_BASE_URL at it. Swapping providers is a config change
-// (EMBEDDING_BASE_URL/EMBEDDING_MODEL/EMBEDDING_DIMENSION/EMBEDDING_API_KEY), never a code change.
-//
-// `encodingFormat: 'float'` is required, not optional — verified live: the `openai` SDK's default
-// request asks for `encoding_format: "base64"` (standard OpenAI-API behavior), and the
-// currently-configured provider's base64 path silently returns a quarter of the real vector (192
-// values instead of 768) for the default model here, not an error. Forcing plain `"float"`
-// encoding bypasses that broken path entirely. Kept unconditional since every OpenAI-compatible
-// provider supports plain float encoding — don't remove this "to simplify" without re-testing
-// first.
+// Provider-agnostic: any OpenAI-compatible /v1/embeddings server works via EMBEDDING_BASE_URL, no
+// code change. `encodingFormat: 'float'` is required — the `openai` SDK's default
+// (`encoding_format: "base64"`) silently truncates the vector on the currently-configured
+// provider; see docs/planning/03-crawler-scraper-indexing-plan.md §7.
 @Injectable()
 export class OpenAiEmbeddingClient implements IEmbeddingClient {
   private readonly client: OpenAIEmbeddings;
@@ -25,18 +18,13 @@ export class OpenAiEmbeddingClient implements IEmbeddingClient {
       config.get<string>('EMBEDDING_BASE_URL') ?? 'http://localhost:1234/v1';
     const model =
       config.get<string>('EMBEDDING_MODEL') ??
-      'text-embedding-nomic-embed-text-v1.5'; // default matches the currently-configured
-    // provider — whatever's actually loaded on the other end of EMBEDDING_BASE_URL must match
-    // this, not the other way around.
+      'text-embedding-nomic-embed-text-v1.5';
     this.expectedDimension = Number(
       config.get<string>('EMBEDDING_DIMENSION') ?? '768',
     );
     this.client = new OpenAIEmbeddings({
       model,
-      // A real hosted provider needs a real key here (EMBEDDING_API_KEY); a self-hosted server
-      // usually ignores it, but the SDK still requires a truthy string to construct — 'not-needed'
-      // is a placeholder, not a real credential.
-      apiKey: config.get<string>('EMBEDDING_API_KEY') ?? 'not-needed',
+      apiKey: config.get<string>('EMBEDDING_API_KEY') ?? 'not-needed', // SDK requires a truthy string
       encodingFormat: 'float',
       configuration: { baseURL },
     });
@@ -46,8 +34,7 @@ export class OpenAiEmbeddingClient implements IEmbeddingClient {
     const vectors = await this.client.embedDocuments(texts);
     for (const vector of vectors) {
       if (vector.length !== this.expectedDimension) {
-        // A persistent misconfiguration (wrong model loaded on the provider, or
-        // EMBEDDING_DIMENSION doesn't match it) — not something a retry fixes.
+        // Persistent misconfiguration — not something a retry fixes.
         throw new PermanentIndexError(
           `Embedding returned ${vector.length} dimensions, expected ${this.expectedDimension} (EMBEDDING_DIMENSION) — check EMBEDDING_MODEL matches what the configured provider has loaded`,
         );

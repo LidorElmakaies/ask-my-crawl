@@ -9,7 +9,7 @@ infrastructure generally, not just Postgres — see the `devops` agent's "Non-ne
 CREATE EXTENSION IF NOT EXISTS pgcrypto; -- for gen_random_uuid()
 ```
 
-`pgvector` isn't needed — embeddings live in a self-hosted **Milvus** instance instead (see "Owned
+`pgvector` isn't needed — embeddings live in a self-hosted **Qdrant** instance instead (see "Owned
 by the Scraper and the Indexer" below, and `docs/planning/03-crawler-scraper-indexing-plan.md`).
 Postgres holds only relational data (users, jobs, notifications) for this project.
 
@@ -105,20 +105,26 @@ Neither owns a Postgres table:
 - **Scraper** — **implemented** (`backend/apps/scraper`). Writes raw HTML to **SeaweedFS**
   (self-hosted, S3-compatible blob store), keyed by `sha256(normalizedUrl)`. No freshness/TTL
   logic, no cross-job cache — every job fetches and overwrites the blob for a URL it visits.
-- **Indexer** — **not implemented**. Writes embedded chunks to **Milvus** (self-hosted vector DB).
-  Milvus needs an explicit collection schema, not inferred from writes:
-  - **Vector field**: dimension TBD — set by whichever embedding model is loaded into LM Studio
-    (e.g. 768 or 1024, model-dependent; see `docs/specs/README.md`'s stack section). Index
-    type/metric: `HNSW` + `COSINE`.
-  - **Scalar fields** (filterable/deletable on): `job_id`, `user_id`, `url`, `query`, `chunk_index`,
-    `scraped_at`.
-  - On re-scrape, the Indexing Worker deletes existing vectors for a `url` (Milvus delete-by-filter,
-    e.g. `url == "..."`) before upserting the new chunks.
-  - `job_id` as a scalar field is what scopes a RAG query to one job's crawl — there's no cross-job
+- **Indexer** — **implemented** (`backend/apps/indexer`). Writes embedded chunks to **Qdrant**
+  (self-hosted vector DB, `devops/qdrant` — a single container). Collection schema:
+  - **Vector field**: dimension **768** — `text-embedding-nomic-embed-text-v1.5` in LM Studio is
+    this project's default pick (`EMBEDDING_MODEL`/`EMBEDDING_DIMENSION` env vars, so a different
+    model is a config change, not a code change). Index type/metric: `HNSW` + `COSINE`, built
+    automatically as part of collection creation.
+  - **Payload fields** (filterable/deletable on): `job_id`, `user_id`, `url`, `query`, `chunk_index`,
+    `scraped_at`, plus **`text`** (the chunk's own content) — needed because Query/Answer Service has
+    to get the real text back from a similarity search, not just a vector.
+  - On re-scrape, the Indexing Worker deletes existing vectors for a `url` (Qdrant delete-by-filter,
+    a `must`/`match` condition on the `url` payload field) before upserting the new chunks, so a
+    re-indexed page never leaves stale chunks behind.
+  - `job_id` as a payload field is what scopes a RAG query to one job's crawl — there's no cross-job
     content sharing in this design (every job re-fetches and overwrites), so nothing beyond the
     `job_id` already stamped on each chunk is needed to express "which pages belong to which job."
+  - Qdrant point IDs must be a uint64 or a valid UUID — arbitrary strings are rejected. Each chunk
+    gets a fresh `randomUUID()` at upsert time; stable IDs across re-indexes aren't needed since
+    delete-by-`url` always runs first.
 
-Both services share **Redis** coordination state (dedup set, pending-work counters, completion race
+Both services share **Redis** coordination state (dedup set, pending-work counters, completion
 guard) — see "Redis" below. That's ephemeral job-coordination plumbing, not owned domain data, the
 same way both already share the `crawl-frontier`/`page-scraped`/`crawl-complete` Kafka topics.
 
@@ -149,27 +155,34 @@ CREATE INDEX ON notifications_log (user_id);
 
 ## Redis
 
-**Implemented** (the Scraper's side — `devops/redis`, one shared instance; the Indexer will reuse
-it once built, not provision its own). Per-job coordination state shared between the Scraper and
-the Indexer (dedup set, two pending-work counters, completion race guard), plus BullMQ's own
-internal queue keys for the `process-url`/`index-page` queues. Not a table of record for either
-service — see "Owned by the Scraper and the Indexer" above. Full key list in
-`docs/planning/03-crawler-scraper-indexing-plan.md`'s "Redis keys" table:
+**Implemented** (`devops/redis`, one shared instance — used by both the Scraper and the Indexer,
+never one per service). Per-job coordination state shared between the Scraper and the Indexer
+(dedup set, two pending-work counters, completion guard), plus BullMQ's own internal queue keys for
+the `process-url`/`index-page` queues. Not a table of record for either service — see "Owned by the
+Scraper and the Indexer" above. Full key list in `docs/planning/
+03-crawler-scraper-indexing-plan.md`'s "Redis keys" table:
 
 | Key | Type | Purpose |
 |---|---|---|
-| `crawl:{job_id}:visited` | Set | authoritative per-job dedup gate |
-| `job:{job_id}:pending_scrape` | Int | completion tracking |
-| `job:{job_id}:pending_index` | Int | completion tracking |
-| `job:{job_id}:succeeded` | Set | URLs that finished the full pipeline successfully |
-| `job:{job_id}:failed` | Set | URLs that terminally failed (scrape or index stage) |
-| `job:{job_id}:notified` | flag | race guard, completion fires exactly once |
+| `crawl:{job_id}:visited` | Set | authoritative per-job dedup gate (Scraper only) |
+| `job:{job_id}:pending_scrape` | Int | completion tracking — Scraper writes, Indexer reads (the Scraper never reads it back) |
+| `job:{job_id}:pending_index` | Int | completion tracking — Indexer writes and reads |
+| `job:{job_id}:succeeded` | Set | URLs the Scraper successfully scraped — scrape-stage only; a page can be in this set yet have permanently failed to index (a deliberate POC-level simplification, not a bug — see `services.md`'s Indexer section) |
+| `job:{job_id}:failed` | Set | URLs that terminally failed to scrape |
+| `job:{job_id}:notified` | flag | completion fires exactly once — `SET NX`'d by the Indexer only (the Scraper never checks for completion at all, see `03-crawler-scraper-indexing-plan.md` §6 for why) |
+
+Each side keeps its **own independent copy** of the Redis client code (`RedisCoordinationStore` in
+both `apps/scraper/src/infrastructure/redis/` and `apps/indexer/src/infrastructure/redis/`) rather
+than a shared lib — each only needs part of this surface (the Indexer never touches the dedup gate
+or the succeeded/failed sets), so the two copies are scoped differently, not just duplicated
+verbatim. The literal key-name strings above must stay byte-identical between them — both are
+covered by a contract test on each side.
 
 No `job:{job_id}:meta` hash — `user_id`/`query`/`base_url` (the job's seed URL, from which
-`base_domain` is derived on demand) all ride on the `crawl-frontier` Kafka message itself instead,
-propagate-only fields set once by Job Manager Service's seed message and copied through unchanged
-by the Scraper on every child it re-publishes (see `event-schemas.md`'s `crawl-frontier` entry) —
-no separate Redis-stored copy needed.
+`base_domain` is derived on demand) all ride on the Kafka message itself instead, propagate-only
+fields set once by Job Manager Service's seed message and copied through unchanged by the Scraper on
+every child it re-publishes (`crawl-frontier`) and onto every `page-scraped` message too (the Indexer
+needs the seed URL for its own `crawl-complete`) — no separate Redis-stored copy needed.
 
 All job-scoped keys get a short cleanup TTL (e.g. 1 hour) once a job completes — no indefinite
 growth. No global cross-job cache.

@@ -30,9 +30,7 @@ import {
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => {
-        // REDIS_URL is a full connection string everywhere else in this app (RedisCoordinationStore
-        // included) — parsed into host/port here because @nestjs/bullmq's `connection` option is
-        // typed as ioredis RedisOptions (host/port/...), not a URL string, per NestJS's own docs.
+        // @nestjs/bullmq's `connection` option is host/port, not a URL string.
         const redisUrl =
           config.get<string>('REDIS_URL') ?? 'redis://redis:6379';
         const { hostname, port } = new URL(redisUrl);
@@ -46,9 +44,8 @@ import {
   ],
   controllers: [FrontierConsumer],
   providers: [
-    // Not behind a token — nothing depends on ProcessUrlWorker itself, it's the `@Processor`-
-    // registered API-layer adapter @nestjs/bullmq discovers and manages directly.
-    ProcessUrlWorker,
+    ProcessUrlWorker, // not behind a token — @nestjs/bullmq discovers it via @Processor directly
+
     { provide: FRONTIER_INTAKE_USE_CASE, useClass: FrontierIntakeService },
     { provide: PROCESS_URL_USE_CASE, useClass: ProcessUrlService },
     { provide: COORDINATION_STORE, useClass: RedisCoordinationStore },

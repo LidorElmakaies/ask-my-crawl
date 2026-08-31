@@ -19,14 +19,14 @@ working this repo with agentic teams: `.claude/agents/{backend,frontend,devops,t
 ## Repo layout
 
 ```
-backend/                 NestJS monorepo — apps/ (gateway, auth, job-manager, scraper; three more
-                          services planned, see docs/specs/services.md) + libs/ (auth-kernel, dtos,
-                          kafka-contracts, otel — shared code between apps)
+backend/                 NestJS monorepo — apps/ (gateway, auth, job-manager, scraper, indexer; two
+                          more services planned, see docs/specs/services.md) + libs/ (auth-kernel,
+                          dtos, kafka-contracts, kafka-client, otel — shared code between apps)
 frontend/                 Expo / React Native app — see frontend/CLAUDE.md for details
 devops/                   docker-compose.yml (app stack) + observability/ (Grafana/Loki/
                           Prometheus/Tempo/OTel — joined to the app stack via a shared Docker
-                          network; gateway/auth/job-manager/scraper send real traces/logs/metrics
-                          here, see backend/libs/otel)
+                          network; gateway/auth/job-manager/scraper/indexer send real
+                          traces/logs/metrics here, see backend/libs/otel)
 docs/specs/               Formal specs — source of truth for how the system is supposed to work
 docs/planning/            Raw decision log — why things are the way they are
 ```
@@ -69,13 +69,30 @@ docs/planning/            Raw decision log — why things are the way they are
   confirmed the transient-failure path genuinely retries `SCRAPER_FETCH_MAX_ATTEMPTS` times before
   giving up. Only HTML content is handled — a non-HTML response hits a deliberately unimplemented
   stub (`handleUnsupportedContentType`), not silently ignored.
-- **Not implemented**: **Indexer** (the other half of the crawl/scrape/index pipeline — same
-  planning doc), Query/Answer Service, Notification Service.
-  `backend/libs/kafka-contracts` (topic names + typed Kafka payloads matching
-  `docs/specs/event-schemas.md`) is now imported by Job Manager Service and the Scraper; every
-  topic in `event-schemas.md` now has at least a producer or a consumer except the ones still
-  awaiting Indexer/Query-Answer/Notification. Milvus is part of the Indexer's design but has no
-  `devops/` service definition yet — see the `devops` agent.
+- **Indexer** (`backend/apps/indexer`) — Kafka-only microservice (no HTTP surface, no Postgres
+  table of its own), the other half of `docs/planning/03-crawler-scraper-indexing-plan.md`. Two
+  internal pieces: **Index Intake Consumer** (`@EventPattern('page-scraped')`, bridges each message
+  onto BullMQ's `index-page` queue, no dedup gate needed) and **Indexing Worker(s)** (BullMQ
+  workers — fetch the raw blob from SeaweedFS, strip HTML to text via `cheerio`, chunk via
+  `RecursiveCharacterTextSplitter`, embed via LM Studio's OpenAI-compatible API, delete stale
+  vectors and upsert the new ones into Qdrant, and — as the only service that ever does — publish
+  `crawl-complete`, once it observes the job's pending counters both reach zero). Own scoped copy of
+  the Redis coordination logic and the SeaweedFS reader (see `docs/specs/data-model.md` for why
+  these stay per-service, unlike the Kafka producer — see `backend/libs/kafka-client` below).
+  Verified end-to-end against the live stack: a real crawl of `info.cern.ch` produced 24 indexed
+  pages, 64 chunks in Qdrant with correct `job_id` scoping and real readable text, a real
+  `crawl-complete` fired exactly once with the correct seed-URL `url` field, and re-submitting the
+  same seed URL confirmed no stale chunks survive a re-index. Originally built against Milvus (a
+  real 3-container etcd+MinIO+standalone topology), migrated to Qdrant (a single container, no
+  external metadata/object-storage dependency) once that complexity proved unwarranted for this
+  project's scale — see `docs/planning/03-crawler-scraper-indexing-plan.md` §7. A real integration
+  bug found and fixed along the way (commented at its exact call site, see
+  `docs/specs/services.md`'s Indexer section): LM Studio's default embedding request encoding
+  (`base64`) silently truncates the vector, fixed by forcing `encodingFormat: 'float'`.
+- **Not implemented**: Query/Answer Service, Notification Service. `backend/libs/kafka-contracts`
+  (topic names + typed Kafka payloads matching `docs/specs/event-schemas.md`) is imported by every
+  producer/consumer above; every topic in `event-schemas.md` now has at least a producer or a
+  consumer except the ones still awaiting Query-Answer/Notification.
 
 ## Commands
 
@@ -100,10 +117,10 @@ npx expo start --web
 **Easiest way to run the whole backend + web frontend together**: Docker Compose. **Observability
 must come up first** — `devops/docker-compose.yml` references `devops/observability`'s Docker
 network as `external: true`, so the whole `devops/` compose project (`gateway`/`auth`/`job-manager`/
-`scraper`/everything) fails to start without it already existing:
+`scraper`/`indexer`/everything) fails to start without it already existing:
 ```bash
 cd devops/observability && docker compose --env-file ../.env up -d   # Grafana (via Gateway's /admin/grafana, no direct port), Loki, Prometheus, Tempo, OTel Collector
-cd .. && docker compose up -d --build                                # postgres, redis, seaweedfs, gateway (:8000), auth (:8001), job-manager, scraper, frontend (:8081), kafka (:9092)
+cd .. && docker compose up -d --build                                # postgres, redis, seaweedfs, qdrant, gateway (:8000), auth (:8001), job-manager, scraper, indexer, frontend (:8081), kafka (:9092)
 ```
 `devops/.env` (copy from `devops/.env.example`) holds `PUBLIC_ORIGIN` — the single source of truth
 for the deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and the frontend build.
@@ -113,11 +130,14 @@ command picks it up automatically since Compose reads `.env` from the directory 
 `kafka` brings up a single-broker KRaft (no Zookeeper) instance plus a one-off `kafka-init` service
 that creates all seven topics `event-schemas.md` defines (`job-requests`/`crawl-frontier`/
 `job-created`/`answer-ready`/`result-saved` for Job Manager Service, `crawl-complete`/`page-scraped`
-for the Scraper — matching its partition/retention table exactly), then exits — see the `devops`
-agent for image/version and listener layout. `redis` (one shared instance, backs the Scraper's
-BullMQ queue + per-job coordination state — the Indexer will reuse the same instance once it's
-built, never its own) and `seaweedfs` (S3-compatible raw-HTML store, `seaweedfs-init` creates the
-`askmycrawl-raw-html` bucket explicitly) both exist now too. `devops/` has no Makefile (removed
+for the Scraper/Indexer — matching its partition/retention table exactly), then exits — see the
+`devops` agent for image/version and listener layout. `redis` (one shared instance, backs both the
+Scraper's and the Indexer's BullMQ queues + per-job coordination state) and `seaweedfs`
+(S3-compatible raw-HTML store, `seaweedfs-init` creates the `askmycrawl-raw-html` bucket explicitly)
+exist too. `qdrant` (self-hosted vector DB, a single container — see the `devops` agent) needs a
+**locally-running LM Studio instance** reachable at
+`host.docker.internal:1234` for the Indexer's embedding calls to succeed — LM Studio itself isn't
+containerized, nothing in `docker compose up` starts it. `devops/` has no Makefile (removed
 deliberately — `make` isn't installed on this dev machine, see the `devops` agent) — the
 two-command sequence above, in that order, is the only way to bring it up. Android/iOS still run
 via `npx expo start` locally, not containerized.
@@ -135,10 +155,14 @@ concretely, not just as hygiene.
 **Backend** — NestJS monorepo, clean/hexagonal layering (API → Application → Infrastructure, plus a
 `models/` domain layer) enforced in every app — see `docs/specs/backend-architecture.md` before
 writing backend code, it's the actual contract, not a suggestion. Shared code lives in `libs/`:
-`auth-kernel` (JWT sign/verify, `UserRole`) and `dtos` (request/response shapes more than one
-service needs to agree on). Password hashing is salt+pepper+SHA-256 per `docs/specs/auth.md`'s
-exact formula. CORS is enabled permissively (`origin: true`) on both Gateway and Auth Service for
-this Docker Compose dev phase — lock down before any real deployment.
+`auth-kernel` (JWT sign/verify, `UserRole`), `dtos` (request/response shapes more than one service
+needs to agree on), and `kafka-client` (`IEventPublisher`/`KafkajsEventPublisher` — the one Kafka
+producer wrapper every publishing service imports, extracted once a 4th consumer made 3
+byte-identical per-service copies real duplication instead of hypothetical; `clientId` is a
+constructor parameter each service supplies via its own module, not hardcoded). Password hashing is
+salt+pepper+SHA-256 per `docs/specs/auth.md`'s exact formula. CORS is enabled permissively
+(`origin: true`) on both Gateway and Auth Service for this Docker Compose dev phase — lock down
+before any real deployment.
 
 **Frontend** — Expo Router app, file-based routing under `app/`, with a `(tabs)` group. Redux
 Toolkit for state, with a strict services-layer convention: all I/O (HTTP, WebSocket) lives in
@@ -154,17 +178,19 @@ reordered.
 
 **Observability** — `devops/observability/`: app → OTLP/gRPC → Collector → fans out to Loki (logs),
 Prometheus (metrics), Tempo (traces), all viewable in Grafana. `gateway`/`auth`/`job-manager`/
-`scraper` all send real telemetry via the shared `backend/libs/otel` lib. `gateway`/`auth` get a
-per-request log line via `createRequestLoggingMiddleware` (HTTP-specific); `job-manager`/`scraper`
-have no HTTP surface, so their per-message activity shows up as Kafka spans instead
-(`@opentelemetry/instrumentation-kafkajs`, auto-included) — confirmed live for the Scraper too,
-along with `aws-sdk` spans (`S3.PutObject`, for every SeaweedFS blob write) and outbound `tcp.connect`
-spans for each page fetch, not just assumed from the metric names existing. A real request/message
-produces a root-span trace in Tempo with real child spans, a log line in Loki correlated to it by
-`trace_id`, and per-route-or-topic/per-status metrics in Prometheus. Each service with no HTTP/DB
-surface (`job-manager`, `scraper`) has its own Grafana dashboard dropping the panels that don't
-apply to it (`service-job-manager.json`, `service-scraper.json` — see `devops.md`'s Grafana
-dashboard section for the pattern to copy for a new service).
+`scraper`/`indexer` all send real telemetry via the shared `backend/libs/otel` lib. `gateway`/`auth`
+get a per-request log line via `createRequestLoggingMiddleware` (HTTP-specific); `job-manager`/
+`scraper`/`indexer` have no HTTP surface, so their per-message activity shows up as Kafka spans
+instead (`@opentelemetry/instrumentation-kafkajs`, auto-included) — confirmed live for the Scraper
+too, along with `aws-sdk` spans (`S3.PutObject`, for every SeaweedFS blob write) and outbound
+`tcp.connect` spans for each page fetch, not just assumed from the metric names existing. A real
+request/message produces a root-span trace in Tempo with real child spans, a log line in Loki
+correlated to it by `trace_id`, and per-route-or-topic/per-status metrics in Prometheus. Each
+service with no HTTP/DB surface (`job-manager`, `scraper`) has its own Grafana dashboard dropping
+the panels that don't apply to it (`service-job-manager.json`, `service-scraper.json` — see
+`devops.md`'s Grafana dashboard section for the pattern to copy for a new service); **the Indexer
+doesn't have one yet** — it sends real telemetry (`[otel] started for service.name="indexer"`,
+confirmed live), it just hasn't gotten its own dashboard file, unlike `job-manager`/`scraper`.
 Two things worth knowing before touching this: (1) if the collector isn't reachable when an app
 boots, telemetry export just fails — `start-otel.ts` logs that failure via `diag`, but there's no
 retry buffer, so an outage means real data loss for its duration, not just a delay; (2) apps build

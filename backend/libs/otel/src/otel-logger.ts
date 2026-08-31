@@ -1,16 +1,10 @@
-// A NestJS LoggerService that tees every log line to two places:
-//   1. the console, timestamped/PID'd close to Nest's own default format, so `docker compose
-//      logs -f <service>` stays readable
-//   2. the OTel logs pipeline (sdk-logs LoggerProvider -> OTLP/gRPC -> Collector -> Loki)
+// A NestJS LoggerService that tees every log line to the console and the OTel logs pipeline
+// (sdk-logs LoggerProvider -> OTLP/gRPC -> Collector -> Loki). Not Winston — no extra dependency.
 //
-// Deliberately not Winston: no extra dependency, no second logging config to keep in sync.
-//
-// `LoggerService` is imported as a *type only* on purpose. `@app/otel` is required as the very
-// first thing `main.ts` does — before OTel's require()-patching is installed for the modules that
-// come after it — so this file must not pull `@nestjs/common` (or anything else instrumented)
-// into the process as a side effect. A `import type` is erased at compile time, so it doesn't.
-// `@opentelemetry/api`/`api-logs` are the OTel SDK's own API packages, never auto-instrumentation
-// targets themselves, so importing them here at module scope is safe regardless of load order.
+// `LoggerService` is imported as a *type only* — @app/otel is required first in main.ts, before
+// OTel's require()-patching runs, so this file must not pull @nestjs/common in as a real
+// side-effect import. @opentelemetry/api/api-logs are safe to import normally — never
+// auto-instrumentation targets themselves.
 
 import type { LoggerService } from '@nestjs/common';
 import { context as otelContext, trace } from '@opentelemetry/api';
@@ -72,8 +66,7 @@ export class OtelLogger implements LoggerService {
   ): void {
     const text = stringify(message);
 
-    // Nest passes the logger context (e.g. "NestFactory", "RoutesResolver") as the last argument,
-    // and for error() a stack trace just before it. Everything else is extra detail.
+    // Nest passes the logger context as the last argument.
     const params = [...optionalParams];
     let logContext: string | undefined;
     if (params.length > 0 && typeof params[params.length - 1] === 'string') {
@@ -82,20 +75,11 @@ export class OtelLogger implements LoggerService {
     const details =
       params.length > 0 ? params.map(stringify).join(' ') : undefined;
 
-    // Whatever span is active when this log call happens (e.g. inside an HTTP request handler) —
-    // undefined during bootstrap, before any request has an active span. Read once, used for both
-    // outputs below, rather than re-derived per output (the active context can only be read
-    // synchronously, right here — not later, e.g. from inside an async callback).
+    // The active span, if any — must be read synchronously here, not later from a callback.
     const spanContext = trace.getSpan(otelContext.active())?.spanContext();
 
-    // Console: human-readable, timestamped, structured similarly to Nest's own default shape
-    // ("[Nest] <pid>  - <date>  <LEVEL> [<context>] <message>") so `docker compose logs` didn't
-    // regress just because the logger implementation changed underneath it — but the bracketed tag
-    // is the actual service name (`this.scope`, e.g. "scraper"), not the literal word "Nest": a
-    // line's text needs to say which SERVICE produced it, not just visually resemble Nest's own
-    // logger. `process.pid` alone doesn't identify which REPLICA of that service either — every
-    // container runs its Node process as PID 1 (Dockerfiles use exec-form CMD) — so
-    // `service.instance.id` (the container hostname, see start-otel.ts) rides alongside it.
+    // service.instance.id (container hostname) rides alongside pid, since every container's
+    // process is PID 1 — pid alone can't tell replicas apart.
     const consoleFn =
       severity.number >= SeverityNumber.ERROR ? console.error : console.log;
     consoleFn(
@@ -106,14 +90,9 @@ export class OtelLogger implements LoggerService {
     );
 
     try {
-      // Resolved lazily every time: the global LoggerProvider is only registered once
-      // startOtel() has run, and this class may be constructed by code that doesn't know that.
-      //
-      // Body is JSON, not a plain string — Loki's derivedFields config
-      // (devops/observability/grafana/provisioning/datasources/datasources.yaml) links a log line
-      // to its trace via a `"trace_id":"<id>"` regex match against the LINE ITSELF, not against
-      // labels/structured metadata. That's a real constraint on this shape, not a style choice —
-      // changing the key names here breaks that link silently.
+      // Body is JSON, not a plain string — Loki's derivedFields config links a log line to its
+      // trace via a `"trace_id":"<id>"` regex match against the line itself. Changing these key
+      // names breaks that link silently.
       const attributes: AnyValueMap = {};
       if (logContext) attributes['log.context'] = logContext;
       if (details) attributes['log.details'] = details;

@@ -8,9 +8,7 @@ import { KAFKA_CONSUMER_GROUPS } from '@app/kafka-contracts';
 import { IndexerModule } from './indexer.module';
 
 async function bootstrap() {
-  // No HTTP surface — Kafka-only microservice, same shape as the Scraper's/Job Manager Service's
-  // main.ts. The `index-page` BullMQ worker (IndexingWorker) starts on its own OnModuleInit,
-  // independent of this Kafka transport.
+  // No HTTP surface — Kafka-only microservice.
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     IndexerModule,
     {

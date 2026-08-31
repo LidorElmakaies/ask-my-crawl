@@ -1,6 +1,6 @@
 ---
 name: devops
-description: DevOps/infrastructure engineer for askmycrawl. Current focus is Docker Compose — postgres/gateway/auth/job-manager/scraper/redis/seaweedfs/frontend are already running (devops/docker-compose.yml); Indexer/Query-Answer/Notification (and Milvus) come later, as they're built. AWS is a documented future phase, not the near-term target. Use for Dockerfiles, docker-compose, and anything under devops/.
+description: DevOps/infrastructure engineer for askmycrawl. Current focus is Docker Compose — postgres/gateway/auth/job-manager/scraper/indexer/redis/seaweedfs/qdrant/frontend are already running (devops/docker-compose.yml); Query-Answer/Notification come later, as they're built. AWS is a documented future phase, not the near-term target. Use for Dockerfiles, docker-compose, and anything under devops/.
 tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, WebFetch, WebSearch
 ---
 
@@ -12,34 +12,37 @@ focus or scope-creep into the compose setup now.
 ## What you're deploying
 
 NestJS services planned, see `docs/specs/services.md`, built from `backend/apps/*` (Nest monorepo —
-see the `backend` agent). **`gateway`, `auth`, `job-manager`, and `scraper` are real and running
-today**; Indexer/Query-Answer/Notification don't exist yet. Plus a **web preview** of the
+see the `backend` agent). **`gateway`, `auth`, `job-manager`, `scraper`, and `indexer` are real and
+running today**; Query-Answer/Notification don't exist yet. Plus a **web preview** of the
 frontend — a static `expo export --platform web` build served by Caddy (`frontend/Dockerfile` +
 `frontend/Caddyfile`). Android/iOS are not containerized (nothing to gain — no compiled runtime to
 isolate, and it actively breaks phone/simulator connectivity) and still run via `npx expo start`
-locally. **Kafka, Redis, and SeaweedFS are all up** (2026-08-28) — `kafka-init` creates all seven
-topics `event-schemas.md` defines; Redis backs the Scraper's BullMQ queue + per-job coordination
-state; SeaweedFS holds raw scraped HTML, its `seaweedfs-init` one-off creates the
-`askmycrawl-raw-html` bucket explicitly. Verified end-to-end with a real crawl, not just "containers
-are Up" — see the Scraper's entry in `CLAUDE.md`'s "What's actually implemented" for the specifics.
+locally. **Kafka, Redis, SeaweedFS, and Qdrant are all up** — `kafka-init` creates all seven topics
+`event-schemas.md` defines; Redis backs both the Scraper's and the Indexer's BullMQ queues + per-job
+coordination state; SeaweedFS holds raw scraped HTML, its `seaweedfs-init` one-off creates the
+`askmycrawl-raw-html` bucket explicitly; Qdrant (self-hosted vector DB) holds embedded chunks —
+originally built against Milvus's real 3-container etcd+MinIO+standalone topology, migrated to
+Qdrant's single-container one once the complexity of that topology proved unwarranted for this
+project's scale. Verified end-to-end with a real crawl, not just "containers are Up" — see the
+Scraper's/Indexer's entries in `CLAUDE.md`'s "What's actually implemented" for the specifics.
 
-**The Indexer's infra is designed, not built** — see
-`docs/planning/03-crawler-scraper-indexing-plan.md`. Redis and SeaweedFS already exist (above) and
-the Indexer must point at those **same** instances when it's built, never provision its own (the
-"reuse existing shared infrastructure" non-negotiable below). Two pieces still genuinely don't
-exist anywhere in `devops/`:
-- **Milvus** (self-hosted vector DB) — replaces the pgvector plan entirely; embeddings never touch
-  Postgres. Milvus itself typically needs etcd + object storage as its own dependencies — check
-  its current official docker-compose reference before hand-rolling a minimal setup.
-- **LM Studio** — **not containerized.** It's a desktop app exposing an OpenAI-compatible HTTP
-  server on the host (default `http://localhost:1234`), not a compose service. Whichever container
-  runs the Indexing Worker needs a host-reachable address for it (`host.docker.internal` on Docker
-  Desktop for Windows/Mac — confirm the equivalent if this ever runs on Linux, where that hostname
-  doesn't resolve by default) — flag this as a real piece of wiring when the Indexer is actually
-  built, don't assume a compose service name will work.
+**Qdrant** (`devops/qdrant/docker-compose.yml`) — self-hosted vector DB, replaces the pgvector plan
+entirely; embeddings never touch Postgres. Genuinely a single container — no external etcd/MinIO
+dependency the way Milvus needed. Image pinned to a real currently-published stable tag
+(`qdrant/qdrant:v1.19.0`, confirmed against Docker Hub rather than assumed). No `curl`/`wget` in the
+official image (deliberate upstream security choice, not an oversight —
+`github.com/qdrant/qdrant/issues/4250`), so its healthcheck uses the `/dev/tcp` bash-redirection
+workaround Qdrant's own reference compose file uses, not the `curl -f .../healthz` pattern every
+other service here follows.
 
-Don't stand either of these up speculatively — same "as they're built" discipline as everything
-else in this file.
+**LM Studio** — **not containerized.** It's a desktop app exposing an OpenAI-compatible HTTP server
+on the host (default `http://localhost:1234`), not a compose service. The `indexer` container
+reaches it via `host.docker.internal` (Docker Desktop for Windows/Mac provides this natively;
+`devops/indexer/docker-compose.yml` also sets `extra_hosts: host.docker.internal:host-gateway` for
+Linux Docker hosts, where that name doesn't resolve by default). Verified live: a real LM Studio
+instance serving `text-embedding-nomic-embed-text-v1.5` was reachable from inside the `indexer`
+container and produced real 768-dim embeddings once a real bug in the request encoding was found
+and fixed (see the Indexer's entry in `CLAUDE.md` and `services.md`).
 
 ## Docker Compose — implemented, running today
 
@@ -47,30 +50,35 @@ else in this file.
 
 | Service | Image/build | Port | Notes |
 |---|---|---|---|
-| `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector extension — per the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`), pgvector **isn't needed at all**: embeddings live in a separate self-hosted Milvus instance, not Postgres. Don't swap this image for a pgvector-enabled one. `POSTGRES_DB=askmycrawl`, shared by every table-owning service (see "Non-negotiables" below) |
+| `postgres` | `postgres:16-alpine` | 5432 | healthchecked; plain image, no pgvector extension — per the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`), pgvector **isn't needed at all**: embeddings live in a separate self-hosted Qdrant instance, not Postgres. Don't swap this image for a pgvector-enabled one. `POSTGRES_DB=askmycrawl`, shared by every table-owning service (see "Non-negotiables" below) |
 | `gateway` | `backend/apps/gateway/Dockerfile` | 8000 | Socket.IO realtime + HTTP proxy to Auth Service (`/auth/*`, `/me`, `/admin/users*`) + `/jobs*` proxy to Job Manager Service (`POST /jobs` publishes `job-requests` directly; `GET /jobs*` forwards). Also a Kafka consumer (`job-created`/`result-saved`, relayed onto WS) and a Kafka producer (`job-requests`); CORS enabled (`origin: true`, dev-permissive) |
 | `auth` | `backend/apps/auth/Dockerfile` | 8001 | Called only by the Gateway now (server-to-server) — the frontend never reaches this directly, that's a hard project rule. CORS still enabled (`origin: true`) but is dead config at this point; port still published to the host for direct debugging/curl, not because anything else needs it — worth reconsidering both, not done yet |
 | `job-manager` | `backend/apps/job-manager/Dockerfile` | — (no HTTP surface) | Kafka-only microservice (`NestFactory.createMicroservice`, `Transport.KAFKA`) — consumes `job-requests`/`answer-ready`, produces `crawl-frontier` (seed)/`job-created`/`result-saved`. Writes the `jobs` table on the shared `askmycrawl` Postgres database (see the `postgres` row above) |
 | `scraper` | `backend/apps/scraper/Dockerfile` | — (no HTTP surface) | Kafka-only microservice + a BullMQ worker running in the same process (`ProcessUrlWorker`, started from its own `OnModuleInit`, independent of the Kafka transport). Consumes `crawl-frontier`, produces `crawl-frontier` (children)/`page-scraped`/`crawl-complete`. Owns no Postgres table — writes raw HTML to `seaweedfs` and coordination state to `redis` instead |
-| `redis` | `redis:7.4-alpine` | 6379 | One shared instance — BullMQ's `process-url` queue + every `job:{job_id}:*`/`crawl:{job_id}:visited` coordination key (docs/planning/03-crawler-scraper-indexing-plan.md). The Indexer reuses this same instance once it's built, never its own |
-| `seaweedfs` | `chrislusf/seaweedfs:4.44` | 8333 (S3 API), 9333 (master), 8888 (filer) — all host-published for debugging only | Single-node combined `server` mode (`-s3` flag), not the project's own 6-service topology (overkill for this dev phase). S3 identity config (access/secret key) generated into the container at startup via `printf` (not a heredoc — see the file's own comment for why a heredoc silently breaks under YAML's folded block style), sourced from `backend/.env` so the Scraper's own S3 client always agrees with it |
+| `indexer` | `backend/apps/indexer/Dockerfile` | — (no HTTP surface) | Kafka-only microservice + a BullMQ worker (`IndexingWorker`) in the same process, same shape as `scraper`. Consumes `page-scraped`, produces `crawl-complete` — the only service that ever does (see `03-crawler-scraper-indexing-plan.md` §6). Owns no Postgres table — reads raw HTML from `seaweedfs`, coordination state from `redis` (own scoped copy, not shared code with the Scraper's), writes vectors to `qdrant`, calls LM Studio on the host for embeddings |
+| `redis` | `redis:7.4-alpine` | 6379 | One shared instance — BullMQ's `process-url`/`index-page` queues + every `job:{job_id}:*`/`crawl:{job_id}:visited` coordination key (docs/planning/03-crawler-scraper-indexing-plan.md). Used by both the Scraper and the Indexer, never one per service |
+| `seaweedfs` | `chrislusf/seaweedfs:4.44` | 8333 (S3 API), 9333 (master), 8888 (filer) — all host-published for debugging only | Single-node combined `server` mode (`-s3` flag), not the project's own 6-service topology (overkill for this dev phase). S3 identity config (access/secret key) generated into the container at startup via `printf` (not a heredoc — see the file's own comment for why a heredoc silently breaks under YAML's folded block style), sourced from `backend/.env` so the Scraper's and Indexer's S3 clients always agree with it |
 | `seaweedfs-init` | `amazon/aws-cli:2.36.23` | — | One-off: creates the `askmycrawl-raw-html` bucket explicitly (`aws s3 mb`), then exits. Same explicit-not-implicit discipline as `kafka-init` |
+| `qdrant` | `qdrant/qdrant:v1.19.0` | 6333 (REST), 6334 (gRPC) — both host-published for debugging only; in-network services use `qdrant:6333` | Single container, no external metadata/object-storage dependency (unlike Milvus). `HNSW`/`COSINE` collection, 768-dim vectors, built automatically at collection-creation time — see `data-model.md`. Healthcheck uses a `/dev/tcp` bash workaround, not `curl` — see the Qdrant paragraph above |
 | `frontend` | `frontend/Dockerfile` | 8081 | Caddy serving the static web export |
-| `kafka` | `apache/kafka:4.3.1` | 9092 (host, via `PLAINTEXT_HOST`) | Single-broker KRaft (combined broker+controller), no Zookeeper. In-network services use `kafka:19092` (`PLAINTEXT` listener); `9092`/`PLAINTEXT_HOST` is for host-side debugging tools only. Job Manager Service and the Scraper are both real producers/consumers — see "Kafka" section below |
-| `kafka-init` | `apache/kafka:4.3.1` | — | One-off: creates all seven topics `docs/specs/event-schemas.md` defines (`job-requests`/`crawl-frontier`/`job-created`/`answer-ready`/`result-saved` for Job Manager Service, `crawl-complete`/`page-scraped` for the Scraper) (`kafka-topics.sh --create`), then `--describe`s all seven, then exits. Runs after `kafka` reports healthy (`depends_on: condition: service_healthy`), not just started |
+| `kafka` | `apache/kafka:4.3.1` | 9092 (host, via `PLAINTEXT_HOST`) | Single-broker KRaft (combined broker+controller), no Zookeeper. In-network services use `kafka:19092` (`PLAINTEXT` listener); `9092`/`PLAINTEXT_HOST` is for host-side debugging tools only. Job Manager Service, the Scraper, and the Indexer are all real producers/consumers — see "Kafka" section below |
+| `kafka-init` | `apache/kafka:4.3.1` | — | One-off: creates all seven topics `docs/specs/event-schemas.md` defines (`job-requests`/`crawl-frontier`/`job-created`/`answer-ready`/`result-saved` for Job Manager Service, `crawl-complete`/`page-scraped` for the Scraper/Indexer) (`kafka-topics.sh --create`), then `--describe`s all seven, then exits. Runs after `kafka` reports healthy (`depends_on: condition: service_healthy`), not just started |
 
-- **Done**: joined to `devops/observability/`'s network, `gateway`/`auth`/`job-manager`/`scraper`
-  send real OTel telemetry — see the "OpenTelemetry" section below for the full picture, including
-  two real bugs found and fixed while wiring it up (don't re-break either): silent telemetry loss
-  when the collector isn't up yet (mitigated by always bringing `devops/observability` up *first* —
-  see "Startup order" below), and `:latest` image tags that had silently drifted Tempo onto an
-  incompatible config schema (every observability image is pinned now).
+- **Done**: joined to `devops/observability/`'s network, `gateway`/`auth`/`job-manager`/`scraper`/
+  `indexer` send real OTel telemetry — see the "OpenTelemetry" section below for the full picture,
+  including two real bugs found and fixed while wiring it up (don't re-break either): silent
+  telemetry loss when the collector isn't up yet (mitigated by always bringing
+  `devops/observability` up *first* — see "Startup order" below), and `:latest` image tags that had
+  silently drifted Tempo onto an incompatible config schema (every observability image is pinned
+  now).
 - **Kafka: built and verified** — see the "Kafka" section below for the full picture (image
-  choice, listener layout, topic list, and the real produce/consume proof); Job Manager Service and
-  the Scraper are both real producers/consumers. **Redis and SeaweedFS: built and verified** — a
-  real crawl (`info.cern.ch`) produced real blobs in SeaweedFS and real coordination state in
-  Redis, confirmed by inspecting both directly (`aws s3 ls`, `redis-cli`), not just trusting the
-  pipeline's own success signal.
+  choice, listener layout, topic list, and the real produce/consume proof); Job Manager Service, the
+  Scraper, and the Indexer are all real producers/consumers. **Redis, SeaweedFS, and Qdrant: built
+  and verified** — a real crawl (`info.cern.ch`) produced real blobs in SeaweedFS, real coordination
+  state in Redis, and real embedded chunks in Qdrant (originally verified against Milvus before the
+  migration, re-verified against Qdrant afterward), confirmed by inspecting all three directly
+  (`aws s3 ls`, `redis-cli`, a direct Qdrant API query), not just trusting the pipeline's own success
+  signal.
 - **No Makefile for `devops/`, deliberately** — one existed briefly (mirroring `devops/
   observability/Makefile`'s convention) but was removed: `make` isn't installed on the actual dev
   machine this project runs on, so it was dead weight nobody could use, not a convenience. Operate
@@ -464,39 +472,34 @@ All seven topics `event-schemas.md` defines now exist, created by `kafka-init`'s
 this table if the two ever disagree. All replication-factor 1 (single broker, spec doesn't specify
 one so this is the only valid choice), retention config set explicitly from the spec's table:
 
-| Topic | Partitions (spec / actual) | Retention (spec / actual) | Status |
+| Topic | Partitions | Retention | Producer(s) → Consumer(s) |
 |---|---|---|---|
-| `job-requests` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28, Job Manager Service packaging); produced by Gateway's `jobs-proxy` on `POST /jobs`, consumed by Job Manager Service |
-| `crawl-frontier` | 6 / 6 | 1 day / `retention.ms=86400000` | created (2026-08-28); seed-produced by Job Manager Service, consumed **and** re-produced by the Scraper's Frontier Consumer/Scraper Worker (2026-08-28) |
-| `job-created` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, consumed by Gateway (relayed onto WS as `job.created`) |
-| `answer-ready` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); consumed by Job Manager Service, not yet produced (awaits Query/Answer Service) — created anyway since `auto.create.topics.enable=false` would otherwise reject the consumer at startup |
-| `result-saved` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28); produced by Job Manager Service, consumed by Gateway (relayed onto WS as `job.completed`) |
-| `crawl-complete` | 3 / 3 | 1 day / `retention.ms=86400000` | created (2026-08-28, Scraper packaging); produced by the Scraper (whichever component wins the completion race — currently always the Scraper, since the Indexer doesn't exist yet), no consumer wired up yet (awaits Query/Answer Service) |
-| `page-scraped` | TBD / 6 | TBD / `retention.ms=86400000` | created (2026-08-28); the plan doc left partitions/retention as "decide when wiring up kafka-init" — decided: 6 partitions (matching `crawl-frontier`'s spread), 1 day retention (matching every other topic). Produced by the Scraper, no consumer wired up yet (awaits the Indexer) |
+| `job-requests` | 3 | 1 day | Gateway's `jobs-proxy` (`POST /jobs`) → Job Manager Service |
+| `crawl-frontier` | 6 | 1 day | Job Manager Service (seed) + the Scraper's Scraper Worker (children) → the Scraper's Frontier Consumer |
+| `job-created` | 3 | 1 day | Job Manager Service → Gateway (relayed onto WS as `job.created`) |
+| `answer-ready` | 3 | 1 day | not yet produced (awaits Query/Answer Service) → Job Manager Service; exists anyway since `auto.create.topics.enable=false` would otherwise reject the consumer at startup |
+| `result-saved` | 3 | 1 day | Job Manager Service → Gateway (relayed onto WS as `job.completed`) |
+| `crawl-complete` | 3 | 1 day | the Indexer only (never the Scraper — see `03-crawler-scraper-indexing-plan.md` §6) → not yet consumed (awaits Query/Answer Service) |
+| `page-scraped` | 6 | 1 day | the Scraper → the Indexer |
 
-No mismatches on the seven created topics — they match `event-schemas.md`'s table exactly (`page-scraped`'s partition count was genuinely undecided in the spec until this pass, not a mismatch).
+Matches `event-schemas.md`'s table exactly. `kafka-topics.sh --create --if-not-exists` (in
+`kafka-init`) creates every topic that has at least one producer/consumer designed for it, even ones
+not yet built — `answer-ready` above is why: `auto.create.topics.enable=false` means an unbuilt
+producer/consumer still needs its topic pre-created, or the side that does exist would fail to
+start.
 
-**Verified with a real produce/consume round-trip, not just "container is `Up`.`"** First attempt
-(`docker exec devops-kafka-1 kafka-console-producer.sh ... <<'EOF' ... EOF`) silently produced
-nothing — `docker exec` without `-i` doesn't attach stdin, so the producer got immediate EOF and
-exited `0` having sent zero bytes, which looked identical to success until offsets were checked
-(`kafka-get-offsets.sh` showed `0` on every partition after the "successful" run). Re-ran with
-`docker exec -i`, confirmed the offset actually advanced (partition 0: `0` → `1`), then consumed it
-back with `kafka-console-consumer.sh --from-beginning --max-messages 1` and got the exact JSON
-payload back (a `crawl-frontier`-shaped message: `job_id`/`user_id`/`url`/`depth`). This is
-worth remembering the same way the two OpenTelemetry bugs above are: **a clean exit code is not
-proof a Kafka CLI tool did what it looked like it did — check the actual state (offsets, in this
-case) when verifying, the same discipline as everywhere else in this file.**
+**A clean exit code from a Kafka CLI tool isn't proof it worked** — `docker exec` without `-i`
+silently drops stdin, so a piped `kafka-console-producer.sh` call can exit `0` having sent zero
+bytes. Always check the actual state (offsets via `kafka-get-offsets.sh`, or consume it back) when
+verifying a produce, not just the exit code.
 
 **Data persistence**: `./data/kafka` volume mounted at `/var/lib/kafka/data`
 (`KAFKA_LOG_DIRS`), matching the `./data/postgres` convention — survives `down`, wiped only by
 `docker compose down -v` (after which the pinned `CLUSTER_ID` still works against the freshly
 re-formatted directory, see above).
 
-**Not done, deliberately out of scope for this pass**: Job Manager Service and the Scraper are the
-only producers/consumers wired up so far (see "What you're deploying" above); `backend/libs/
-kafka-contracts` (typed event payloads) is imported by both; the Gateway/Indexer/Query-Answer/
+**Not done, deliberately out of scope for now**: Gateway, Job Manager Service, the Scraper, and the
+Indexer are the producers/consumers wired up so far (see "What you're deploying" above);
+`backend/libs/kafka-contracts` (typed event payloads) is imported by all four; the Query-Answer/
 Notification sides of these same topics are still unbuilt; no broker-level observability (see the
-`observability` network decision above); Milvus has no compose service definition yet (see "What
-you're deploying" above) — deferred to when the Indexer is actually built, per
-`docs/planning/03-crawler-scraper-indexing-plan.md`.
+`observability` network decision above).

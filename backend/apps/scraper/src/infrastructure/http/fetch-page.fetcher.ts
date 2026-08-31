@@ -8,10 +8,8 @@ import type {
 
 const FETCH_TIMEOUT_MS = 30_000;
 
-// Plain HTTP fetch via Node's built-in global fetch — no headless browser, per
-// docs/planning/03-crawler-scraper-indexing-plan.md §5. 4xx -> PermanentFetchError (no retry makes
-// sense); everything else that goes wrong (timeout, connection error, 5xx) -> a plain Error, left
-// for BullMQ's attempts/backoff to retry — decided directly with the user, 2026-08-28.
+// Plain HTTP fetch, no headless browser — see docs/planning/03-crawler-scraper-indexing-plan.md
+// §5. 4xx -> PermanentFetchError; everything else (timeout, connection error, 5xx) -> transient.
 @Injectable()
 export class FetchPageFetcher implements IPageFetcher {
   async fetch(url: string): Promise<PageFetchResult> {

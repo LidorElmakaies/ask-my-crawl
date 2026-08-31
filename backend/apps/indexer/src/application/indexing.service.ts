@@ -27,9 +27,8 @@ import type {
 } from '../infrastructure/interfaces/vector-store.interface';
 import type { IIndexingUseCase } from './interfaces/indexing-use-case.interface';
 
-// Indexing Worker's use case — fetch, clean, chunk, embed, delete-stale, upsert, per
-// docs/planning/03-crawler-scraper-indexing-plan.md §7. See IIndexingUseCase's doc comment for why
-// handle() and finalizeIndex() are split the way they are.
+// Indexing Worker's use case — fetch, clean, chunk, embed, delete-stale, upsert. See
+// docs/planning/03-crawler-scraper-indexing-plan.md §7 and IIndexingUseCase's doc comment.
 @Injectable()
 export class IndexingService implements IIndexingUseCase {
   private readonly logger = new Logger(IndexingService.name);
@@ -47,13 +46,9 @@ export class IndexingService implements IIndexingUseCase {
   ) {}
 
   async handle(data: PageScrapedMessage): Promise<void> {
-    // 1. Fetch the raw blob the Scraper saved. A missing object is permanent — retrying can't
-    // produce a blob that isn't there (blobRepository.get() itself is responsible for throwing
-    // PermanentIndexError on a 404/NoSuchKey vs. a plain Error on any other SeaweedFS failure).
+    // Missing blob is permanent, not transient.
     const html = await this.blobRepository.get(data.blobKey);
 
-    // 2. Strip HTML down to plain text. A parse failure here would be the same bytes every retry —
-    // permanent, not transient.
     let text: string;
     try {
       text = this.textExtractor.extract(html);
@@ -65,23 +60,18 @@ export class IndexingService implements IIndexingUseCase {
 
     await this.vectorStore.ensureCollection();
 
-    // 3. Chunk. Empty/whitespace-only text (e.g. a JS-rendered page with no server HTML) is not an
-    // error — just delete any stale vectors for a URL that's now empty and stop.
+    // Empty text (e.g. a JS-rendered page) isn't an error — just clear stale vectors and stop.
     const pieces = text.trim().length > 0 ? await this.chunker.split(text) : [];
     if (pieces.length === 0) {
       await this.vectorStore.deleteByUrl(data.normalizedUrl);
       return;
     }
 
-    // 4. Embed. embeddingClient.embed() is responsible for throwing a plain Error on a connection
-    // failure (transient) or PermanentIndexError on a persistent dimension mismatch.
     const vectors = await this.embeddingClient.embed(pieces);
 
-    // 5. Delete stale vectors for this URL — always, before upsert, so a re-index is idempotent
-    // regardless of whether the chunk count changed.
+    // Always delete before upsert, so a re-index is idempotent regardless of chunk count.
     await this.vectorStore.deleteByUrl(data.normalizedUrl);
 
-    // 6. Upsert the new chunks.
     const chunks: VectorChunk[] = pieces.map((chunkText, i) => ({
       jobId: data.job_id,
       userId: data.user_id,
@@ -97,13 +87,7 @@ export class IndexingService implements IIndexingUseCase {
 
   async finalizeIndex(
     data: PageScrapedMessage,
-    // Not branched on for the completion logic below — unlike the Scraper's finalizeUrl, this side
-    // never writes to the succeeded/failed Redis sets (those stay scrape-stage-only, see this
-    // file's own header comment above and docs/specs/data-model.md). Still logged (the one real use
-    // below): visibility into per-page index outcomes is useful on its own, and kept as a parameter
-    // to mirror IIndexingUseCase's/IProcessUrlUseCase's shared shape in case a future revision of
-    // this POC-level simplification wants to branch on it too.
-    outcome: 'succeeded' | 'failed',
+    outcome: 'succeeded' | 'failed', // logged only — succeeded/failed sets stay scrape-stage-only
   ): Promise<void> {
     const jobId = data.job_id;
     this.logger.log(
@@ -117,7 +101,7 @@ export class IndexingService implements IIndexingUseCase {
 
     const wonRace = await this.coordinationStore.tryClaimCompletion(jobId);
     if (!wonRace) {
-      return; // the Scraper already claimed it
+      return; // already claimed by another call for this job (redelivery)
     }
 
     const urls = await this.coordinationStore.getCompletionUrls(jobId);

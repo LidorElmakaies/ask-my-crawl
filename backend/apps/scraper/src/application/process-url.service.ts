@@ -27,9 +27,6 @@ import type { IPageFetcher } from '../infrastructure/interfaces/page-fetcher.int
 import type { IRobotsTxtChecker } from '../infrastructure/interfaces/robots-txt-checker.interface';
 import type { IProcessUrlUseCase } from './interfaces/process-url-use-case.interface';
 
-// A use-case-local classification of the fetched response's Content-Type — nothing outside this
-// file's switch dispatch needs it, so it stays here rather than in models/ (see
-// backend-architecture.md's "use-case I/O shape stays local" test).
 type ContentTypeFamily = 'html' | 'unsupported';
 
 function contentTypeFamily(contentType: string | undefined): ContentTypeFamily {
@@ -37,9 +34,8 @@ function contentTypeFamily(contentType: string | undefined): ContentTypeFamily {
   return normalized.includes('text/html') ? 'html' : 'unsupported';
 }
 
-// Scraper Worker's use case — fetch, save, extract+filter+re-publish, per
-// docs/planning/03-crawler-scraper-indexing-plan.md §5. See IProcessUrlUseCase's doc comment for
-// why handle() and finalizeUrl() are split the way they are.
+// Scraper Worker's use case — fetch, save, extract+filter+re-publish. See
+// docs/planning/03-crawler-scraper-indexing-plan.md §5.
 @Injectable()
 export class ProcessUrlService implements IProcessUrlUseCase {
   constructor(
@@ -58,18 +54,12 @@ export class ProcessUrlService implements IProcessUrlUseCase {
     const url = stripFragment(data.url);
     const baseUrl = stripFragment(data.base_url);
 
-    // Checked before every fetch — seed and re-discovered links alike, no exceptions. A
-    // robots.txt disallow is permanent (retrying won't change it), so it reuses
-    // PermanentFetchError the same way an HTTP 4xx does.
     const allowed = await this.robotsTxtChecker.isAllowed(url);
     if (!allowed) {
-      throw new PermanentFetchError(`Disallowed by robots.txt: ${url}`);
+      throw new PermanentFetchError(`Disallowed by robots.txt: ${url}`); // permanent, not transient
     }
 
     const result = await this.pageFetcher.fetch(url);
-    // fetch() throws PermanentFetchError (4xx) or a plain Error (transient) on failure — both
-    // propagate straight out of this method for process-url.worker.ts to translate/retry.
-
     const family = contentTypeFamily(result.contentType);
     if (family === 'html') {
       await this.handleHtmlPage(data, url, baseUrl, result.body);
@@ -104,8 +94,7 @@ export class ProcessUrlService implements IProcessUrlUseCase {
     const blobKey = sha256Hex(url);
     await this.blobRepository.save(blobKey, html, 'text/html');
 
-    // Only re-publish children if the NEXT hop would still be within budget — see
-    // docs/planning/03-crawler-scraper-indexing-plan.md §5c.
+    // Only re-publish children if the next hop is still within budget.
     const childDepth = data.depth - 1;
     if (childDepth > 0) {
       const baseDomain = hostnameOf(baseUrl);
@@ -154,20 +143,13 @@ export class ProcessUrlService implements IProcessUrlUseCase {
     );
   }
 
-  // Deliberate stub — decided 2026-08-28 to leave this extension point in place rather than
-  // hardcode "only HTML exists." What actually happens for a second content type (skip silently?
-  // save the raw blob without indexing? something else?) isn't decided — implement it for real
-  // when one is actually needed, and update docs/planning/03-crawler-scraper-indexing-plan.md's
-  // open items when it does. Reuses PermanentFetchError (not a plain Error) since retrying can't
-  // fix an unsupported content type any more than it can fix a 404.
+  // Deliberate stub — real behavior for a second content type isn't decided yet. See
+  // docs/planning/03-crawler-scraper-indexing-plan.md §8.
   private handleUnsupportedContentType(
+    // not async — no await, only throws; still satisfies Promise<void>
     url: string,
     contentType: string | undefined,
   ): Promise<void> {
-    // Not `async` — the eslint rule @typescript-eslint/require-await flags an async function that
-    // never awaits, and this one only ever throws. Throwing still satisfies the Promise<void>
-    // return type (the caller `await`s it either way; a synchronous throw here becomes a rejected
-    // promise for handle()'s own returned promise, since it's called from inside an async method).
     throw new PermanentFetchError(
       `Unsupported content type "${contentType ?? 'unknown'}" for ${url} — not implemented`,
     );

@@ -1,15 +1,10 @@
-# Self-hosted vector DB for the Indexer (docs/specs/data-model.md's "Owned by the Scraper and the
-# Indexer" section — HNSW/COSINE, not pgvector). Replaced Milvus (a real 3-container etcd+MinIO+
-# standalone topology) — Qdrant needs no external metadata/object-storage services of its own, so
-# this is genuinely one container, not an adapted multi-service one. Version pinned directly from
-# Qdrant's own currently-published stable tag (never `:latest` — see devops.md's Tempo incident for
-# why that's non-negotiable here).
+# Self-hosted vector DB for the Indexer — see docs/specs/data-model.md and
+# docs/planning/03-crawler-scraper-indexing-plan.md §7. Version pinned, never `:latest` — see
+# devops.md.
 #
-# No `curl`/`wget` in the official image (a deliberate security choice upstream, not an oversight —
-# github.com/qdrant/qdrant/issues/4250), so the usual `curl -f http://.../healthz` pattern used
-# elsewhere in this stack doesn't work here. The `/dev/tcp` bash redirection below is Qdrant's own
-# documented workaround (their own reference compose file uses the identical command) — bash is
-# present in the image's debian-slim base even though curl/wget deliberately aren't.
+# No curl/wget in the official image (deliberate upstream, see
+# github.com/qdrant/qdrant/issues/4250) — healthcheck uses Qdrant's own documented /dev/tcp
+# workaround instead.
 services:
   qdrant:
     extends:
@@ -19,8 +14,8 @@ services:
     volumes:
       - ../data/qdrant:/qdrant/storage
     ports:
-      - "6333:6333" # REST API — host debugging only; in-network services use qdrant:6333
-      - "6334:6334" # gRPC API — same, host debugging only
+      - "6333:6333" # REST — host debugging only; in-network services use qdrant:6333
+      - "6334:6334" # gRPC — same
     networks:
       - askmycrawl
     healthcheck:

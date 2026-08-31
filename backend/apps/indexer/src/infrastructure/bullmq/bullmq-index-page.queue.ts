@@ -5,9 +5,8 @@ import { Queue } from 'bullmq';
 import type { PageScrapedMessage } from '@app/kafka-contracts';
 import type { IIndexPageQueue } from '../interfaces/index-page-queue.interface';
 
-// @nestjs/bullmq's Queue injection (BullModule.registerQueue({name: 'index-page'}) in
-// indexer.module.ts) — the module owns the connection lifecycle, this class only enqueues.
-// Mirrors the Scraper's BullMqProcessUrlQueue exactly.
+// Mirrors the Scraper's BullMqProcessUrlQueue. Module owns the connection lifecycle; this class
+// only enqueues.
 @Injectable()
 export class BullMqIndexPageQueue implements IIndexPageQueue {
   private readonly maxAttempts: number;
@@ -24,9 +23,7 @@ export class BullMqIndexPageQueue implements IIndexPageQueue {
 
   async enqueue(data: PageScrapedMessage): Promise<void> {
     await this.queue.add('index-page', data, {
-      // Only transient failures actually consume these — a permanent failure throws bullmq's own
-      // UnrecoverableError instead (see IndexingWorker). Exponential backoff, 5s base, same shape
-      // as the Scraper's process-url queue.
+      // A permanent failure bypasses this via UnrecoverableError — see IndexingWorker.
       attempts: this.maxAttempts,
       backoff: { type: 'exponential', delay: 5000 },
     });

@@ -17,7 +17,7 @@ instead of aspirational.
 | Layer | What you test | How | Volume |
 |---|---|---|---|
 | **Application** | Use-case logic (`*.service.ts` in `application/`) | Unit tests, Application ports mocked (`jest.mock`/manual fakes) — no real Postgres, Kafka, or Redis | Most of the suite — fast, no I/O |
-| **Infrastructure** | Concrete adapters (`TypeOrmUserRepository`, `SaltPepperSha256Hasher`, Kafka producer/consumer wrappers, Redis coordination store, BullMQ queue adapters, SeaweedFS blob repository, Milvus vector store, etc.) | Integration tests against the real dependency (testcontainers for Postgres/Kafka/Redis/whatever else is added, in CI) | Fewer, one set per adapter |
+| **Infrastructure** | Concrete adapters (`TypeOrmUserRepository`, `SaltPepperSha256Hasher`, Kafka producer/consumer wrappers, Redis coordination store, BullMQ queue adapters, SeaweedFS blob repository, Qdrant vector store, etc.) | Integration tests against the real dependency (testcontainers for Postgres/Kafka/Redis/whatever else is added, in CI) | Fewer, one set per adapter |
 | **API** | Controllers, Kafka `@EventPattern` handlers, WS gateway | E2E/contract tests — `supertest` against HTTP routes per `docs/specs/api-contracts.md`, and payload-shape assertions against `docs/specs/event-schemas.md` | Fewest, but covers every route/topic at least once |
 
 ## Where tests live
@@ -58,9 +58,15 @@ at its boundaries — not just "does it not crash." Concretely, for each service
 
 This system's actual risk is in the concurrency and ordering guarantees the pipeline depends on —
 prioritize these over exhaustive input-validation tests. These scenarios are written directly
-against the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`) — the
-Scraper is implemented (`backend/apps/scraper`) and these should run against its real code; the
-Indexer is not implemented yet, so its scenarios below are still forward-looking:
+against the Scraper/Indexer design (`docs/planning/03-crawler-scraper-indexing-plan.md`) — both are
+implemented (`backend/apps/scraper`, `backend/apps/indexer`) and every scenario below should run
+against real code, not treated as forward-looking anymore. A Redis key-name contract test already
+exists on each side (`redis-coordination.store.spec.ts` in both apps) pinning the literal key
+strings byte-identical between the two independent copies — extend that pattern rather than
+re-deriving it. The fan-in completion race below is no longer hypothetical either: a real
+end-to-end run (`info.cern.ch`, both services live) confirmed exactly one `crawl-complete` for the
+job, but that was one live run, not a concurrency test under load — still worth the dedicated test
+below, not a substitute for it:
 
 - **Frontier Consumer dedup gate**: prove `SADD crawl:{job_id}:visited` under real concurrency
   (testcontainers Redis, not a mocked client) lets exactly one message through per normalized URL
@@ -82,14 +88,14 @@ Indexer is not implemented yet, so its scenarios below are still forward-looking
   "fetch succeeds" / "fetch errors."
 - **No cross-job cache, by design**: unlike an earlier (reverted) draft, this design has no
   freshness/TTL cache — two jobs hitting the same URL must each independently re-fetch and
-  overwrite the SeaweedFS blob and the Milvus vectors for that URL, never skip the fetch because
+  overwrite the SeaweedFS blob and the Qdrant vectors for that URL, never skip the fetch because
   another job already scraped it recently. A regression here would silently reintroduce the removed
   cache behavior.
 - **Depth/domain scope discard**: a link discovered at `depth >= 3`, or off the job's locked
   `base_domain`, is never produced onto `crawl-frontier` at all — assert on the producer call, not
   just end state. Test the Frontier Consumer's defense-in-depth domain check too (a message that
   slipped past the Scraper Worker's own filter with the wrong host must still get dropped).
-- **Milvus delete-then-upsert idempotency**: re-indexing a URL (job re-scrapes it) must delete the
+- **Qdrant delete-then-upsert idempotency**: re-indexing a URL (job re-scrapes it) must delete the
   prior chunks for that `url` before upserting new ones — a test that indexes the same URL twice and
   asserts no stale/duplicate chunks remain queryable.
 - **Auth**: hash formula matches `docs/specs/auth.md` exactly (known-vector test, not just "hash

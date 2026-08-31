@@ -3,12 +3,8 @@ export interface PageFetchResult {
   body: string;
 }
 
-/**
- * Implemented by FetchPageFetcher (plain HTTP, 30s timeout, no headless browser). Throws
- * PermanentFetchError for a 4xx response (retrying can't help); throws a plain Error for anything
- * transient (timeout, connection error, 5xx) so BullMQ's attempts/backoff can retry. See
- * docs/planning/03-crawler-scraper-indexing-plan.md §5.
- */
+/** Implemented by FetchPageFetcher. Throws PermanentFetchError for a 4xx response, a plain
+ * (transient) Error for anything else. */
 export interface IPageFetcher {
   fetch(url: string): Promise<PageFetchResult>;
 }

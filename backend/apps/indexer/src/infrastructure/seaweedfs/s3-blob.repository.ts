@@ -4,11 +4,8 @@ import { GetObjectCommand, NoSuchKey, S3Client } from '@aws-sdk/client-s3';
 import { PermanentIndexError } from '../../models/permanent-index-error';
 import type { IBlobRepository } from '../interfaces/blob-repository.interface';
 
-// SeaweedFS's S3-compatible API, via the real AWS SDK — same client shape as the Scraper's own
-// S3BlobRepository (apps/scraper/src/infrastructure/seaweedfs/s3-blob.repository.ts), same
-// endpoint/bucket/credential env vars (SEAWEEDFS_*, reused verbatim — no new vars for this side),
-// but read-only: this is the Indexer's own copy, scoped to only get(), not shared code — see
-// blob-repository.interface.ts's doc comment.
+// SeaweedFS's S3-compatible API. Own read-only copy of the Scraper's S3BlobRepository — see
+// blob-repository.interface.ts.
 @Injectable()
 export class S3BlobRepository implements IBlobRepository {
   private readonly client: S3Client;
@@ -37,15 +34,12 @@ export class S3BlobRepository implements IBlobRepository {
       );
       const body = await response.Body?.transformToString('utf-8');
       if (body === undefined) {
-        // Should be unreachable in practice (a successful GetObject always has a Body), but a
-        // missing body isn't retryable any more than a missing object is.
         throw new PermanentIndexError(`Blob ${blobKey} returned an empty body`);
       }
       return body;
     } catch (err) {
-      // A genuinely-missing object is permanent — retrying can't produce a blob that isn't there.
-      // Checked both ways: the modeled NoSuchKey exception (real AWS S3) and a bare 404 status
-      // (some S3-compatible stores, SeaweedFS included, don't always throw the modeled type).
+      // A missing object is permanent. Checked both ways: the modeled NoSuchKey exception and a
+      // bare 404 status (some S3-compatible stores don't throw the modeled type).
       const status = (err as { $metadata?: { httpStatusCode?: number } })
         ?.$metadata?.httpStatusCode;
       if (err instanceof NoSuchKey || status === 404) {

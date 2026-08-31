@@ -1,7 +1,4 @@
-// Topic names + consumer group IDs, matching docs/specs/event-schemas.md exactly. Every app that
-// produces or consumes one of these topics imports the constant here rather than hardcoding the
-// string, so a typo shows up as a compile error (unused import / wrong identifier) instead of a
-// silently-mismatched topic name at runtime.
+// Topic names + consumer group IDs, matching docs/specs/event-schemas.md exactly.
 export const KAFKA_TOPICS = {
   JOB_REQUESTS: 'job-requests',
   CRAWL_FRONTIER: 'crawl-frontier',
@@ -9,21 +6,16 @@ export const KAFKA_TOPICS = {
   CRAWL_COMPLETE: 'crawl-complete',
   ANSWER_READY: 'answer-ready',
   RESULT_SAVED: 'result-saved',
-  // Scraper -> Indexer bridge, see docs/planning/03-crawler-scraper-indexing-plan.md.
-  PAGE_SCRAPED: 'page-scraped',
+  PAGE_SCRAPED: 'page-scraped', // Scraper -> Indexer bridge
 } as const;
 
-// crawl-frontier/crawl-complete still have no consumer group constant here — the Scraper both
-// produces and consumes crawl-frontier (see SCRAPER below for its own consumer group), but
-// crawl-complete's producer is "whichever of Scraper/Indexer wins the completion race" (plan doc
-// §6), not a fixed consumer group of its own.
+// crawl-complete has no consumer group constant — nothing consumes it yet (awaits Query/Answer
+// Service).
 export const KAFKA_CONSUMER_GROUPS = {
   JOB_MANAGER: 'job-manager',
   QUERY_ANSWER: 'query-answer',
   NOTIFICATION_SERVICE: 'notification-service',
   GATEWAY: 'gateway',
-  // The Scraper's Frontier Consumer (crawl-frontier) — per docs/specs/services.md.
-  SCRAPER: 'scraper',
-  // The Indexer's Index Intake Consumer (page-scraped) — per docs/specs/services.md.
-  INDEXER: 'indexer',
+  SCRAPER: 'scraper', // the Scraper's Frontier Consumer (crawl-frontier)
+  INDEXER: 'indexer', // the Indexer's Index Intake Consumer (page-scraped)
 } as const;

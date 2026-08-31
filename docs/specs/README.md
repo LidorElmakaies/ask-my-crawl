@@ -4,7 +4,7 @@ Formal specification set, superseding the raw capture in [`../planning/01-archit
 (kept around as the record of *why* these decisions were made).
 
 - [data-model.md](data-model.md) — Postgres schema (relational data only — embeddings live in
-  Milvus, not pgvector), which service owns which tables
+  Qdrant, not pgvector), which service owns which tables
 - [event-schemas.md](event-schemas.md) — Kafka topics, message shapes, producers/consumers
 - [api-contracts.md](api-contracts.md) — REST + WebSocket surface, roles required per endpoint
 - [services.md](services.md) — one service per section: responsibility, owns-what, talks-to-what
@@ -24,67 +24,60 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
   See [planning notes §2](../planning/01-architecture-notes.md#2-language--decided-nestjs-nodejstypescript-all-services)
   for the "why."
 - **Message bus**: Kafka (via `@nestjs/microservices`) — `backend/libs/kafka-contracts` (topic
-  names + message shapes) and the broker/topic-init exist; Job Manager Service and the Scraper are
-  both real producers/consumers today. **BullMQ** (Redis-backed) sits alongside Kafka for the
-  Scraper's (and, once built, the Indexer's) own retry/backoff (`process-url`, `index-page`
-  queues), used raw (`bullmq`'s own `Queue`/`Worker` classes, not `@nestjs/bullmq`'s decorators —
-  matches this project's existing kafkajs-used-raw precedent) — see
+  names + message shapes) and the broker/topic-init exist; Job Manager Service, the Scraper, and the
+  Indexer are all real producers/consumers today. **BullMQ** (Redis-backed) sits alongside Kafka for
+  the Scraper's and Indexer's own retry/backoff (`process-url`, `index-page` queues), used raw
+  (`bullmq`'s own `Queue`/`Worker` classes, not `@nestjs/bullmq`'s decorators — matches this
+  project's existing kafkajs-used-raw precedent) — see
   [the full plan](../planning/03-crawler-scraper-indexing-plan.md).
-- **Cache/coordination**: **Redis — implemented** (`devops/redis`, one shared instance). Scoped
-  narrowly to per-job coordination state for the Scraper/Indexer pipeline (dedup set, pending-work
-  counters, a completion race guard) plus BullMQ's own queue keys — not a general-purpose cache, and
-  not owned data the way a Postgres table is (shared between the Scraper and, once built, the
-  Indexer, like the Kafka topics between them — a new consumer of this instance, never its own).
-  Full key list in the plan doc above.
+- **Cache/coordination**: **Redis** (`devops/redis`, one shared instance). Scoped narrowly to
+  per-job coordination state for the Scraper/Indexer pipeline (dedup set, pending-work counters, a
+  completion guard) plus BullMQ's own queue keys — not a general-purpose cache, and not owned data
+  the way a Postgres table is. Full key list in the plan doc above.
 - **Storage**: Postgres for relational data (users, jobs, notifications) — `pgvector` isn't needed;
-  embeddings live in a self-hosted **Milvus** instance instead (not yet built). Auth Service and Job
-  Manager Service both use TypeORM against the same shared `askmycrawl` database
-  (`synchronize: true` outside production — no migration framework yet, see `auth.md`); other
-  services' DB access approach is TBD when each gets built. Raw scraped HTML goes to a self-hosted
-  **SeaweedFS** instance (S3-compatible blob store, `devops/seaweedfs` — implemented), not
-  Postgres — see `data-model.md`.
+  embeddings live in a self-hosted **Qdrant** instance instead. Auth Service and Job Manager Service
+  both use TypeORM against the same shared `askmycrawl` database (`synchronize: true` outside
+  production — no migration framework yet, see `auth.md`). Raw scraped HTML goes to a self-hosted
+  **SeaweedFS** instance (S3-compatible blob store, `devops/seaweedfs`), not Postgres — see
+  `data-model.md`.
 - **Embeddings**: self-hosted via **LM Studio** (OpenAI-compatible local API — `OpenAIEmbeddings`
-  from `@langchain/openai`, pointed at LM Studio's server). LM Studio itself is a desktop app, not a
-  container — the Indexer reaches it over a host address, not a compose service name. Which
-  specific GGUF embedding model to load is still open (determines the Milvus vector dimension).
+  from `@langchain/openai`, pointed at any OpenAI-compatible server via `EMBEDDING_BASE_URL`,
+  swappable with no code change). LM Studio itself is a desktop app, not a container — the Indexer
+  reaches it over a host address, not a compose service name. Current default model:
+  `text-embedding-nomic-embed-text-v1.5`, 768-dim.
 - **Internal service-to-service calls**: plain HTTP via Nest's `HttpModule` — see `services.md`.
   (The Scraper and Indexer are the exception — they never call each other synchronously, only via
   Kafka + shared Redis state.)
-- **Notifications**: email, SMS, Telegram Bot API.
+- **Notifications**: email, SMS, Telegram Bot API — not implemented yet (Notification Service).
 - **Frontend**: existing Expo/React Native app in `frontend/` (see [frontend/CLAUDE.md](../../frontend/CLAUDE.md)),
   built from reusable components (shared input fields etc. across screens) rather than per-screen markup.
-- **Deployment**: Docker Compose for now (`devops/docker-compose.yml`, alongside the existing
-  `devops/observability/`) — AWS is a documented future phase, not the current target. See the
-  `devops` agent for how it's built/extended (including OpenTelemetry wiring, Grafana dashboards)
-  and [devops/observability/README.md](../../devops/observability/README.md) for how to run and
-  use the observability stack day to day. Redis and SeaweedFS now have `devops/` service
-  definitions (added alongside the Scraper); Milvus still doesn't — it gets added when the Indexer
-  is actually built, not speculatively.
+- **Deployment**: Docker Compose (`devops/docker-compose.yml`, alongside `devops/observability/`) —
+  AWS is a documented future phase, not the current target. See the `devops` agent for how it's
+  built/extended (including OpenTelemetry wiring, Grafana dashboards) and
+  [devops/observability/README.md](../../devops/observability/README.md) for how to run and use the
+  observability stack day to day.
+
+## Not yet built
+
+The crawl-and-index pipeline is complete and working end to end — a submitted job gets crawled,
+scraped, chunked, embedded, and stored in Qdrant. What's missing is the step that turns that into an
+actual answer:
+
+- **Query/Answer Service** — not implemented. The one remaining piece of the RAG loop: on
+  `crawl-complete`, retrieve the top-k relevant chunks from the Indexer for the job's query, pass
+  them plus the query to an LLM, publish `answer-ready`. See `services.md`'s Query/Answer section.
+- **Notification Service** — not implemented. On `answer-ready`, send email/SMS/Telegram.
 
 ## Still open (tracked, not blocking)
 
-- LLM (answer-generation) provider — the *embedding* model provider is decided (self-hosted, LM
-  Studio), but which specific model to load in LM Studio (affects the Milvus vector dimension) and
-  which LLM API answers the RAG step are both still open.
+- LLM (answer-generation) provider for Query/Answer Service — not decided.
 - Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives).
 - Telegram account-linking flow (bot deep-link / linking code).
 - CORS is permissively open (`origin: true`) on the Gateway for this dev phase — needs locking down
-  to specific origins before any real deployment. Auth Service's own CORS is dead config worth
-  removing (or its host port unpublished) rather than tightening — the Gateway proxies every route,
-  so nothing browser-side calls Auth Service directly, meaning CORS is moot there; not done yet,
-  flagging rather than silently deciding either way.
+  to specific origins before any real deployment.
 - Whether refresh tokens (or an access-token revocation list) should move to Redis for faster
-  lookups — if so, that's an Auth-Service-internal swap behind `IRefreshTokenRepository`, not
-  something the Gateway reaches into directly (breaks the per-service data-ownership rule). If this
-  happens, it would most likely reuse the Scraper/Indexer's own Redis instance rather than standing
-  up a second one — not decided, flag before assuming either way.
-- URL normalization: the Scraper strips only the URL fragment (`#...`) — a fragment never reaches
-  the server, so this can't lose content — and deliberately leaves query strings and everything
-  else untouched (a different `?query=...` can serve genuinely different content). See
-  `docs/planning/03-crawler-scraper-indexing-plan.md` §2. Redirect-following is unrelated to
-  normalization and is whatever the underlying `fetch()` call does by default.
-- Per-domain rate limiting for the Scraper — not implemented, not even a stub/interface. Still
-  open, deferred.
+  lookups — not decided.
+- Per-domain rate limiting for the Scraper — not implemented.
 - The Indexer's query-time retrieval API for Query/Answer Service — not designed yet, see
   `services.md`'s Indexer section.
 - IaC tool (Terraform vs CDK) and CI/CD pipeline for AWS deployment.

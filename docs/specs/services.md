@@ -17,7 +17,7 @@ the **Scraper** and **Indexer** sections below; this file only summarizes it.
                   │  Service  │        ▼                                   │ (depth+1)
                   │(Postgres) │  ┌────────────────────┐  page-scraped  ┌───┴────────────┐
                   └───────────┘  │      Scraper        │────(Kafka)───▶│    Indexer      │
-                                  │ (Redis + SeaweedFS) │                │ (Redis + Milvus)│
+                                  │ (Redis + SeaweedFS) │                │ (Redis + Qdrant)│
                                   └──────────────────────┘                └────────┬────────┘
                                                                                     │ crawl-complete
                                                                                     ▼
@@ -37,11 +37,17 @@ the **Scraper** and **Indexer** sections below; this file only summarizes it.
                                                       Gateway (WS push)
 ```
 
-Both `crawl-frontier` (the Scraper re-publishes child URLs back onto it) and `crawl-complete`
-(produced by **either** the Scraper or the Indexer, whichever component's counter-decrement
-observes both `pending_scrape` and `pending_index` at zero and wins the `SET NX` race guard — not
-always the Indexer) are simplified above; see the planning doc's diagram and "Completion detection"
-section for the exact mechanism.
+`crawl-frontier` (the Scraper re-publishes child URLs back onto it) is simplified above; see the
+planning doc's diagram. `crawl-complete` is produced only by the Indexer, once it observes both
+`job:{job_id}:pending_scrape` and `job:{job_id}:pending_index` at zero after its own decrement — the
+Scraper's own decrement never checks for completion (see the planning doc's "Completion detection"
+section for why).
+
+**Status**: Gateway, Auth Service, Job Manager Service, the Scraper, and the Indexer are
+implemented — a job can be submitted, crawled, and fully indexed into Qdrant end to end. Query/Answer
+Service (the RAG step: retrieve from the Indexer, call an LLM, publish `answer-ready`) and
+Notification Service are not built yet — that's what's left before a submitted job actually produces
+an answer back to the user.
 
 ## Gateway
 
@@ -71,13 +77,10 @@ src/auth-proxy/`); Auth Service isn't reachable from the frontend directly, only
 
 ## Scraper
 
-**Implemented** (`backend/apps/scraper`), 2026-08-28 — verified end-to-end against the live stack
-(a real crawl of `info.cern.ch`: 24 pages succeeded with real blobs in SeaweedFS, 1 permanent
-failure correctly classified with no wasted retries, a real `crawl-complete` summary published; a
-separate test confirmed the transient-failure path genuinely retries before giving up). Full
-mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. Two internal components, one Nest
-app — a single concern (fetching and BFS-expanding a job's pages) even though it's internally
-complex, per `backend-architecture.md`'s "single-concern vs. multi-concern" test:
+**Implemented** (`backend/apps/scraper`). Full mechanism: `docs/planning/
+03-crawler-scraper-indexing-plan.md`. Two internal components, one Nest app — a single concern
+(fetching and BFS-expanding a job's pages) even though it's internally complex, per
+`backend-architecture.md`'s "single-concern vs. multi-concern" test:
 
 - **Frontier Consumer** — consumes every message on `crawl-frontier` (both the seed from Job
   Manager Service and every child URL the Scraper Worker re-publishes). Owns the per-job dedup gate
@@ -88,35 +91,52 @@ complex, per `backend-architecture.md`'s "single-concern vs. multi-concern" test
 - **Owns**: nothing in Postgres. Shares per-job coordination state in Redis with the Indexer (dedup
   set, pending counters, completion metadata — not "owned" data in the `data-model.md` sense, see
   the planning doc).
-- **Talks to**: Kafka (`crawl-frontier` in/out, `page-scraped` out, `crawl-complete` out — whichever
-  of Scraper/Indexer wins the completion race), Redis (shared coordination state), SeaweedFS (raw
-  HTML blob writes, S3-compatible API).
+- **Talks to**: Kafka (`crawl-frontier` in/out, `page-scraped` out — never `crawl-complete`; only
+  the Indexer publishes that, see above), Redis (shared coordination state), SeaweedFS (raw HTML
+  blob writes, S3-compatible API).
 
 ## Indexer
 
-**Not implemented.** Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. Two
-internal components, one Nest app, mirroring the Scraper's shape:
+**Implemented** (`backend/apps/indexer`). Full mechanism: `docs/planning/
+03-crawler-scraper-indexing-plan.md`. Two internal components, one Nest app, mirroring the Scraper's
+shape:
 
 - **Index Intake Consumer** — consumes `page-scraped`, bridges each message onto the `index-page`
-  BullMQ queue (same Kafka→BullMQ bridge pattern as the Frontier Consumer).
-- **Indexing Worker(s)** — BullMQ workers on `index-page`. Fetch the raw blob from SeaweedFS, clean
-  it (LangChain document transformer), chunk it (`RecursiveCharacterTextSplitter`), embed it
-  (self-hosted, via LM Studio's OpenAI-compatible API — `OpenAIEmbeddings` from `@langchain/openai`),
-  delete any stale vectors for the URL, and upsert the new chunks into Milvus.
-- **Owns**: nothing in Postgres — no Milvus collection is "owned" the way a Postgres table is
+  BullMQ queue (same Kafka→BullMQ bridge pattern as the Frontier Consumer). No dedup gate (unlike
+  the Frontier Consumer) — each `page-scraped` message already represents one successfully-scraped
+  page, not a URL that might be rediscovered many times.
+- **Indexing Worker(s)** — BullMQ workers on `index-page`. Fetch the raw blob from SeaweedFS,
+  strip it to plain text (`cheerio` — reused rather than pulling in `@langchain/community`'s
+  heavier HTML transformer for one utility), chunk it (`RecursiveCharacterTextSplitter` from
+  `@langchain/textsplitters`), embed it (self-hosted, via LM Studio's OpenAI-compatible API —
+  `OpenAIEmbeddings` from `@langchain/openai`), delete any stale vectors for the URL, and upsert the
+  new chunks into Qdrant. Is the **only** service that ever checks for job completion: once its own
+  decrement observes both pending counters at zero and wins the `SET NX` guard (own scoped copy of
+  the Redis coordination logic — see `data-model.md`), publishes `crawl-complete` with `url` = the
+  job's seed URL (`page-scraped`'s `base_url` field, propagated the same way `crawl-frontier`'s
+  already is). The Scraper deliberately never checks for completion itself — see
+  `03-crawler-scraper-indexing-plan.md` §6.
+- **Owns**: nothing in Postgres — no Qdrant collection is "owned" the way a Postgres table is
   either, but the Indexer is the only service that writes to it.
-- **Talks to**: Kafka (`page-scraped` in, `crawl-complete` out — whichever of Scraper/Indexer wins
-  the completion race), Redis (shared coordination state with the Scraper), SeaweedFS (raw HTML
-  blob reads), Milvus (vector upsert/delete), LM Studio (embedding calls, local OpenAI-compatible
-  HTTP API — not containerized, reached via a host address, not a compose service name).
-- **Not designed**: the read/retrieval path Query/Answer Service needs at query time (a Milvus
+- **Talks to**: Kafka (`page-scraped` in, `crawl-complete` out — the Indexer is the only publisher
+  of that topic, see above), Redis (shared coordination state with the Scraper, own scoped
+  read/write surface — see `data-model.md`), SeaweedFS (raw HTML blob reads), Qdrant (vector
+  upsert/delete), LM Studio (embedding calls, local OpenAI-compatible HTTP API — not containerized,
+  reached via `host.docker.internal`, not a compose service name; swappable for any
+  OpenAI-compatible embedding server via `EMBEDDING_BASE_URL`, no code change).
+- **A real integration quirk to know about before touching this code**: LM Studio's
+  `/v1/embeddings` endpoint silently returns a truncated vector (192 values instead of 768) when
+  asked for `encoding_format: "base64"` — the `openai` SDK's own default — instead of erroring;
+  forcing `encodingFormat: 'float'` on `OpenAIEmbeddings` bypasses the broken path entirely.
+  Commented at its exact call site in `apps/indexer/src/infrastructure/langchain/`.
+- **Not designed**: the read/retrieval path Query/Answer Service needs at query time (a Qdrant
   similarity search scoped to a `job_id`) — presumed to be an internal call to this service, but the
   request/response shape doesn't exist anywhere yet. Flag before inventing one.
 
 ## Query/Answer Service
 
 **Not implemented.** It should, on `crawl-complete`: call the Indexer for the top-k relevant chunks
-for that job's query (Milvus similarity search — request/response shape not designed, see the
+for that job's query (Qdrant similarity search — request/response shape not designed, see the
 Indexer section above); pass them plus the query to an LLM; publish `answer-ready`. `crawl-complete`
 carries `succeeded_urls`/`failed_urls`/counts — whether/how a partial-failure crawl (some URLs
 failed) should change the answer step isn't decided; flag before assuming "ignore failures, answer

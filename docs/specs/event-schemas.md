@@ -94,16 +94,15 @@ above).
 
 ## `page-scraped`
 
-**Implemented** (the producing side — the Scraper). Full mechanism: `docs/planning/
-03-crawler-scraper-indexing-plan.md`. Fires from the Scraper Worker once a page's raw HTML is saved
-to SeaweedFS. The consuming side (the Indexer's Index Intake Consumer, bridging into its
-`index-page` BullMQ queue — Kafka→BullMQ bridge, mirroring `crawl-frontier`→`process-url`) is **not
-implemented** — the Indexer doesn't exist yet.
+**Implemented.** Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`. Fires from the
+Scraper Worker once a page's raw HTML is saved to SeaweedFS; consumed by the Indexer's Index Intake
+Consumer, which bridges it into its `index-page` BullMQ queue (Kafka→BullMQ bridge, mirroring
+`crawl-frontier`→`process-url`).
 
 - **Producers**: the Scraper's Scraper Worker(s)
-- **Consumers**: the Indexer's Index Intake Consumer, consumer group `indexer` (not built yet)
-- **Partition key**: `url_hash` — decided 2026-08-28, spreads Indexer load evenly across
-  partitions; no per-job ordering is needed since each message indexes one independent page
+- **Consumers**: the Indexer's Index Intake Consumer, consumer group `indexer`
+- **Partition key**: `url_hash` — spreads Indexer load evenly across partitions; no per-job ordering
+  is needed since each message indexes one independent page
 - **Value**:
   ```jsonc
   {
@@ -120,16 +119,17 @@ implemented** — the Indexer doesn't exist yet.
 
 ## `crawl-complete`
 
-**Implemented** (the producing side — the Scraper, currently always the one to win the race since
-the Indexer doesn't exist yet). Full mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md`.
-Fires once a job's two Redis pending-work counters (`pending_scrape`, `pending_index`) both reach
-zero — a `SET NX` race guard ensures exactly one producer per job. The payload is a full result
-summary, so Query/Answer Service can act without a callback to fetch counts/URL lists separately —
-verified live: a real crawl produced an accurate `succeeded_count`/`failed_count` split.
+**Implemented** (producing side only — the Indexer's Indexing Worker). Full mechanism:
+`docs/planning/03-crawler-scraper-indexing-plan.md` §6. Fires once a job's two Redis pending-work
+counters (`pending_scrape`, `pending_index`) both reach zero, as observed after the Indexer's own
+`pending_index` decrement — a `SET NX` guard ensures exactly one publish per job even under
+at-least-once Kafka redelivery. The payload is a full result summary, so Query/Answer Service can
+act without a callback to fetch counts/URL lists separately.
 
-- **Producers**: the Scraper's Scraper Worker **or**, once built, the Indexer's Indexing Worker —
-  whichever component's decrement observes both counters at zero and wins the race guard. Not
-  always the same service for every job.
+- **Producers**: the Indexer's Indexing Worker only — the Scraper never checks for completion or
+  publishes this topic (see the planning doc's "Completion detection" section for why: scrape-side
+  completion can't be observed reliably, since `page-scraped`'s delivery to the Indexer is
+  asynchronous relative to the Scraper's own bookkeeping).
 - **Consumers**: Query/Answer Service, consumer group `query-answer` (not implemented — nothing
   consumes this topic today, but it must still exist since `auto.create.topics.enable=false`)
 - **Partition key**: `job_id`
@@ -146,9 +146,6 @@ verified live: a real crawl produced an accurate `succeeded_count`/`failed_count
     "failed_urls": ["https://example.com/broken-page"]
   }
   ```
-  Note for later, not a concern yet: at depth-3/single-domain scope the URL lists stay small; if
-  that scope ever changes, they could move to a small object in SeaweedFS with just a pointer +
-  the counts left in the event.
 
 ## `answer-ready`
 

@@ -4,8 +4,7 @@ import { KAFKA_TOPICS, type CrawlFrontierMessage } from '@app/kafka-contracts';
 import { FRONTIER_INTAKE_USE_CASE } from '../tokens';
 import type { IFrontierIntakeUseCase } from '../application/interfaces/frontier-intake-use-case.interface';
 
-// Inbound trigger only — no business logic here, that lives in FrontierIntakeService
-// (Application layer). Same discipline as job-manager's JobRequestsConsumer.
+// Inbound trigger only — no business logic here, that lives in FrontierIntakeService.
 @Controller()
 export class FrontierConsumer {
   constructor(

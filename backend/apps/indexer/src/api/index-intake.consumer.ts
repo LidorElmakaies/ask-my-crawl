@@ -4,8 +4,8 @@ import { KAFKA_TOPICS, type PageScrapedMessage } from '@app/kafka-contracts';
 import { INDEX_INTAKE_USE_CASE } from '../tokens';
 import type { IIndexIntakeUseCase } from '../application/interfaces/index-intake-use-case.interface';
 
-// Index Intake Consumer — trivial passthrough, mirrors the Scraper's FrontierConsumer. No logic
-// here; see IndexIntakeService for the actual bridge-onto-BullMQ behavior.
+// Trivial passthrough, mirrors the Scraper's FrontierConsumer — see IndexIntakeService for the
+// actual logic.
 @Controller()
 export class IndexIntakeConsumer {
   constructor(

@@ -244,7 +244,7 @@ names only — `RedisCoordinationStoreAdapter`, `SeaweedFsBlobRepository`, `Http
 depends on (`ICoordinationStore`, `IBlobRepository`, `IPageFetcher`, `IEventPublisher`,
 `IProcessUrlQueue`) — all declared in that service's `infrastructure/interfaces/`. Same shape on
 the Indexer's side: Index Intake Consumer / Indexing Worker (API) → an indexing use case
-(Application) → `IBlobRepository` (read), `IEmbeddingClient`, `IVectorStore` (Milvus),
+(Application) → `IBlobRepository` (read), `IEmbeddingClient`, `IVectorStore` (Qdrant),
 `ICoordinationStore` (Redis) (Infrastructure).
 
 ## Why this matters for testing

@@ -32,10 +32,7 @@ import {
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => {
-        // REDIS_URL is a full connection string everywhere else in this app (RedisCoordinationStore
-        // included) — parsed into host/port here because @nestjs/bullmq's `connection` option is
-        // typed as ioredis RedisOptions (host/port/...), not a URL string. Same parsing as the
-        // Scraper's own scraper.module.ts.
+        // @nestjs/bullmq's `connection` option is host/port, not a URL string.
         const redisUrl =
           config.get<string>('REDIS_URL') ?? 'redis://redis:6379';
         const { hostname, port } = new URL(redisUrl);
@@ -49,9 +46,8 @@ import {
   ],
   controllers: [IndexIntakeConsumer],
   providers: [
-    // Not behind a token — nothing depends on IndexingWorker itself, it's the `@Processor`-
-    // registered API-layer adapter @nestjs/bullmq discovers and manages directly.
-    IndexingWorker,
+    IndexingWorker, // not behind a token — @nestjs/bullmq discovers it via @Processor directly
+
     { provide: INDEX_INTAKE_USE_CASE, useClass: IndexIntakeService },
     { provide: INDEXING_USE_CASE, useClass: IndexingService },
     { provide: COORDINATION_STORE, useClass: RedisCoordinationStore },

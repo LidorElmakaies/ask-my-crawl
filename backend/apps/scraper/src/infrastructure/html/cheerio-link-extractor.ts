@@ -11,10 +11,7 @@ export class CheerioLinkExtractor implements IHtmlLinkExtractor {
       const href = $(el).attr('href');
       if (!href) return;
       try {
-        // Resolves a relative href against baseUrl into an absolute URL. Anything unparseable
-        // (mailto:, javascript:, malformed) is skipped here, not thrown — same-domain/depth
-        // filtering happens one layer up, in ProcessUrlService.
-        links.push(new URL(href, baseUrl).toString());
+        links.push(new URL(href, baseUrl).toString()); // resolve relative -> absolute
       } catch {
         // not a parseable URL — skip
       }
