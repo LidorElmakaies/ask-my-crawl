@@ -95,7 +95,11 @@ export default function HistoryScreen() {
               {/* Card Header: URL and Status Badge */}
               <View style={styles.cardHeader}>
                 <View style={styles.urlContainer}>
-                  <Ionicons name="globe-outline" size={16} color={colors.primary} />
+                  <Ionicons
+                    name="globe-outline"
+                    size={16}
+                    color={colors.primary}
+                  />
                   <Text
                     style={[styles.urlText, { color: colors.text }]}
                     numberOfLines={1}
@@ -129,7 +133,9 @@ export default function HistoryScreen() {
                 />
               ) : (
                 <InfoBox variant="pending" icon="sync-outline" row>
-                  <Text style={[styles.pendingText, { color: colors.textMuted }]}>
+                  <Text
+                    style={[styles.pendingText, { color: colors.textMuted }]}
+                  >
                     Crawling pages and synthesizing answer... Updates live.
                   </Text>
                 </InfoBox>

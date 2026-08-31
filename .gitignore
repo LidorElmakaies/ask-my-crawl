@@ -7,5 +7,9 @@ TODO.md
 # Personal Claude Code settings — machine-specific paths/permissions, not meant to be shared.
 .claude/settings.local.json
 
+# Root tooling (husky/lint-staged) devDependencies — same reasoning as backend/frontend's own
+# node_modules ignores, just for the root package.json added to host repo-wide git hooks.
+node_modules/
+
 # OS
 .DS_Store

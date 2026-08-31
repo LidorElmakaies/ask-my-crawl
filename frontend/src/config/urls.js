@@ -4,7 +4,8 @@
 // time). Falls back to the same localhost default for the bare `npx expo start` dev-server loop,
 // which isn't part of that build-arg plumbing — set the env var yourself if you ever need a local
 // dev server pointed at a non-local Gateway.
-const BASE_URL = process.env.EXPO_PUBLIC_GATEWAY_ORIGIN ?? 'http://localhost:8000';
+const BASE_URL =
+  process.env.EXPO_PUBLIC_GATEWAY_ORIGIN ?? 'http://localhost:8000';
 
 export const URLS = {
   base: BASE_URL,
@@ -37,4 +38,3 @@ export const URLS = {
     list: `${BASE_URL}/jobs`,
   },
 };
-

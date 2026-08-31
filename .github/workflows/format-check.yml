@@ -1,0 +1,39 @@
+name: format-check
+
+# Prettier is the only formatting authority for this repo (see backend/.prettierrc and
+# frontend/.prettierrc) — the pre-commit hook (.husky/pre-commit + lint-staged) auto-formats
+# staged files locally, but a hook can be skipped (--no-verify) or simply not installed on a
+# fresh clone. This is the backstop: nothing merges with unformatted code, regardless.
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - working-directory: backend
+        run: npm ci
+      - working-directory: backend
+        run: npm run format:check
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci
+      - working-directory: frontend
+        run: npm run format:check

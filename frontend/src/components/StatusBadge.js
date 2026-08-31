@@ -21,9 +21,18 @@ export default function StatusBadge({ completed, style }) {
       ]}
     >
       {!completed && (
-        <ActivityIndicator size="small" color={colors.primary} style={styles.spinner} />
+        <ActivityIndicator
+          size="small"
+          color={colors.primary}
+          style={styles.spinner}
+        />
       )}
-      <Text style={[styles.text, { color: completed ? colors.success : colors.primary }]}>
+      <Text
+        style={[
+          styles.text,
+          { color: completed ? colors.success : colors.primary },
+        ]}
+      >
         {completed ? 'Completed' : 'In Progress'}
       </Text>
     </View>

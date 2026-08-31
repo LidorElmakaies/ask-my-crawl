@@ -12,18 +12,22 @@ export const fetchUsers = createAsyncThunk(
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 export const updateUser = createAsyncThunk(
   'admin/updateUser',
   async ({ id, patch }, { getState, rejectWithValue }) => {
     try {
-      return await adminService.updateUser(getState().auth.accessToken, id, patch);
+      return await adminService.updateUser(
+        getState().auth.accessToken,
+        id,
+        patch,
+      );
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 export const removeUser = createAsyncThunk(
@@ -35,7 +39,7 @@ export const removeUser = createAsyncThunk(
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 const adminSlice = createSlice({

@@ -1,11 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
-import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Animated,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useSelector } from 'react-redux';
 import { useThemeAnim } from '../../src/context/ThemeAnimContext';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 
-import { dark as darkColors, light as lightColors } from '../../src/theme/colors';
+import {
+  dark as darkColors,
+  light as lightColors,
+} from '../../src/theme/colors';
 
 // 'admin' must stay LAST — CustomTabBar below matches array position to state.index (React
 // Navigation's actual route index, which always includes every registered <Tabs.Screen> in
@@ -14,13 +23,33 @@ import { dark as darkColors, light as lightColors } from '../../src/theme/colors
 // only ever land on 0/1/2 — which still lines up with the filtered (3-item) list below. Reordering
 // 'admin' out of last place would break that alignment.
 const TABS = [
-  { name: 'index',    label: 'Home',     icon: 'home',        iconActive: 'home' },
-  { name: 'scraper',  label: 'Scraper',  icon: 'search-outline', iconActive: 'search' },
-  { name: 'history',  label: 'History',  icon: 'time-outline',   iconActive: 'time' },
-  { name: 'settings', label: 'Settings', icon: 'settings-outline', iconActive: 'settings' },
-  { name: 'admin',    label: 'Admin',    icon: 'shield-outline', iconActive: 'shield', adminOnly: true },
+  { name: 'index', label: 'Home', icon: 'home', iconActive: 'home' },
+  {
+    name: 'scraper',
+    label: 'Scraper',
+    icon: 'search-outline',
+    iconActive: 'search',
+  },
+  {
+    name: 'history',
+    label: 'History',
+    icon: 'time-outline',
+    iconActive: 'time',
+  },
+  {
+    name: 'settings',
+    label: 'Settings',
+    icon: 'settings-outline',
+    iconActive: 'settings',
+  },
+  {
+    name: 'admin',
+    label: 'Admin',
+    icon: 'shield-outline',
+    iconActive: 'shield',
+    adminOnly: true,
+  },
 ];
-
 
 function CustomTabBar({ navigation, state }) {
   const { colors } = useAppTheme();
@@ -109,9 +138,11 @@ export default function TabsLayout() {
           CustomTabBar's own visibleTabs filtering above, which is what actually controls this
           fully custom tab bar's rendering. The route itself stays reachable either way; the real
           boundary is app/(tabs)/admin/_layout.js's redirect plus the backend's own role guard. */}
-      <Tabs.Screen name="admin" options={{ href: role === 'admin' ? undefined : null }} />
+      <Tabs.Screen
+        name="admin"
+        options={{ href: role === 'admin' ? undefined : null }}
+      />
     </Tabs>
-
   );
 }
 

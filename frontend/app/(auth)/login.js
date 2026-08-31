@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../src/components/GlowCard';
@@ -23,8 +29,12 @@ export default function LoginScreen() {
 
   // Format only, no complexity check — an existing account's password may predate the register
   // screen's complexity rule, login just needs to know both fields were filled in and look sane.
-  const emailError = email.trim().length > 0 && !isValidEmail(email) ? 'Enter a valid email address' : null;
-  const canSubmit = email.trim().length > 0 && isValidEmail(email) && password.length > 0;
+  const emailError =
+    email.trim().length > 0 && !isValidEmail(email)
+      ? 'Enter a valid email address'
+      : null;
+  const canSubmit =
+    email.trim().length > 0 && isValidEmail(email) && password.length > 0;
 
   const handleSubmit = () => {
     setSubmitAttempted(true);
@@ -34,9 +44,14 @@ export default function LoginScreen() {
 
   return (
     <SpaceBackground>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
-          <Text style={[styles.heading, { color: colors.text }]}>Welcome back</Text>
+          <Text style={[styles.heading, { color: colors.text }]}>
+            Welcome back
+          </Text>
           <Text style={[styles.subheading, { color: colors.textMuted }]}>
             Log in to continue
           </Text>
@@ -74,11 +89,18 @@ export default function LoginScreen() {
           <View
             style={[
               styles.feedback,
-              { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
+              {
+                backgroundColor: colors.errorBg,
+                borderColor: colors.errorBorder,
+              },
             ]}
           >
-            <Text style={[styles.feedbackTitle, { color: colors.error }]}>✗ Error</Text>
-            <Text style={[styles.feedbackBody, { color: colors.text }]}>{error}</Text>
+            <Text style={[styles.feedbackTitle, { color: colors.error }]}>
+              ✗ Error
+            </Text>
+            <Text style={[styles.feedbackBody, { color: colors.text }]}>
+              {error}
+            </Text>
           </View>
         )}
 
@@ -91,7 +113,9 @@ export default function LoginScreen() {
         >
           <Text style={[styles.switchText, { color: colors.textMuted }]}>
             Don&apos;t have an account?{' '}
-            <Text style={[styles.switchTextBold, { color: colors.primary }]}>Register</Text>
+            <Text style={[styles.switchTextBold, { color: colors.primary }]}>
+              Register
+            </Text>
           </Text>
         </TouchableOpacity>
       </ScrollView>

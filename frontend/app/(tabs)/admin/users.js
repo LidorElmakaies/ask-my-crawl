@@ -1,12 +1,24 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../../src/components/GlowCard';
 import GradientButton from '../../../src/components/GradientButton';
 import InputField from '../../../src/components/InputField';
 import SpaceBackground from '../../../src/components/SpaceBackground';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
-import { clearAdminError, fetchUsers, removeUser, updateUser } from '../../../src/store/slices/adminSlice';
+import {
+  clearAdminError,
+  fetchUsers,
+  removeUser,
+  updateUser,
+} from '../../../src/store/slices/adminSlice';
 
 const ROLES = ['user', 'admin'];
 
@@ -27,7 +39,12 @@ function RolePicker({ value, onChange, colors }) {
               },
             ]}
           >
-            <Text style={[styles.rolePillText, { color: active ? colors.onPrimary : colors.textMuted }]}>
+            <Text
+              style={[
+                styles.rolePillText,
+                { color: active ? colors.onPrimary : colors.textMuted },
+              ]}
+            >
               {role}
             </Text>
           </TouchableOpacity>
@@ -44,7 +61,11 @@ export default function AdminUsersScreen() {
   const currentUserId = useSelector((state) => state.auth.user?.id);
 
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ email: '', phone_number: '', role: 'user' });
+  const [form, setForm] = useState({
+    email: '',
+    phone_number: '',
+    role: 'user',
+  });
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   useEffect(() => {
@@ -67,8 +88,12 @@ export default function AdminUsersScreen() {
     dispatch(
       updateUser({
         id,
-        patch: { email: form.email.trim(), phone_number: form.phone_number.trim(), role: form.role },
-      })
+        patch: {
+          email: form.email.trim(),
+          phone_number: form.phone_number.trim(),
+          role: form.role,
+        },
+      }),
     ).then((action) => {
       if (!action.error) setEditingId(null);
     });
@@ -79,23 +104,43 @@ export default function AdminUsersScreen() {
   return (
     <SpaceBackground>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={[styles.heading, { color: colors.text }]}>User Management</Text>
+        <Text style={[styles.heading, { color: colors.text }]}>
+          User Management
+        </Text>
 
         {status === 'loading' && users.length === 0 && (
-          <ActivityIndicator size="large" color={colors.primary} style={styles.loader} />
+          <ActivityIndicator
+            size="large"
+            color={colors.primary}
+            style={styles.loader}
+          />
         )}
 
         {error && (
-          <View style={[styles.feedback, { backgroundColor: colors.errorBg, borderColor: colors.errorBorder }]}>
-            <Text style={[styles.feedbackTitle, { color: colors.error }]}>✗ Error</Text>
-            <Text style={[styles.feedbackBody, { color: colors.text }]}>{error}</Text>
+          <View
+            style={[
+              styles.feedback,
+              {
+                backgroundColor: colors.errorBg,
+                borderColor: colors.errorBorder,
+              },
+            ]}
+          >
+            <Text style={[styles.feedbackTitle, { color: colors.error }]}>
+              ✗ Error
+            </Text>
+            <Text style={[styles.feedbackBody, { color: colors.text }]}>
+              {error}
+            </Text>
             <TouchableOpacity
               onPress={() => {
                 dispatch(clearAdminError());
                 dispatch(fetchUsers());
               }}
             >
-              <Text style={[styles.retryText, { color: colors.primary }]}>Retry</Text>
+              <Text style={[styles.retryText, { color: colors.primary }]}>
+                Retry
+              </Text>
             </TouchableOpacity>
           </View>
         )}
@@ -117,11 +162,17 @@ export default function AdminUsersScreen() {
                   <InputField
                     label="Phone"
                     value={form.phone_number}
-                    onChangeText={(phone_number) => setForm((f) => ({ ...f, phone_number }))}
+                    onChangeText={(phone_number) =>
+                      setForm((f) => ({ ...f, phone_number }))
+                    }
                     keyboardType="phone-pad"
                   />
                   <View style={styles.wrapper}>
-                    <Text style={[styles.fieldLabel, { color: colors.textMuted }]}>Role</Text>
+                    <Text
+                      style={[styles.fieldLabel, { color: colors.textMuted }]}
+                    >
+                      Role
+                    </Text>
                     <RolePicker
                       value={form.role}
                       onChange={(role) => setForm((f) => ({ ...f, role }))}
@@ -135,18 +186,34 @@ export default function AdminUsersScreen() {
                       loading={isSaving}
                       style={styles.actionButton}
                     />
-                    <TouchableOpacity onPress={cancelEdit} style={styles.cancelButton}>
-                      <Text style={[styles.cancelText, { color: colors.textMuted }]}>Cancel</Text>
+                    <TouchableOpacity
+                      onPress={cancelEdit}
+                      style={styles.cancelButton}
+                    >
+                      <Text
+                        style={[styles.cancelText, { color: colors.textMuted }]}
+                      >
+                        Cancel
+                      </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
               ) : (
                 <View style={styles.readRow}>
                   <View style={styles.readInfo}>
-                    <Text style={[styles.email, { color: colors.text }]}>{user.email}</Text>
+                    <Text style={[styles.email, { color: colors.text }]}>
+                      {user.email}
+                    </Text>
                     <Text style={[styles.meta, { color: colors.textMuted }]}>
                       {user.phone_number || 'No phone'} ·{' '}
-                      <Text style={{ color: user.role === 'admin' ? colors.primary : colors.textMuted }}>
+                      <Text
+                        style={{
+                          color:
+                            user.role === 'admin'
+                              ? colors.primary
+                              : colors.textMuted,
+                        }}
+                      >
                         {user.role}
                       </Text>
                       {user.id === currentUserId ? ' · you' : ''}
@@ -155,27 +222,62 @@ export default function AdminUsersScreen() {
 
                   {isConfirmingDelete ? (
                     <View style={styles.confirmRow}>
-                      <Text style={[styles.confirmText, { color: colors.error }]}>Delete this user?</Text>
+                      <Text
+                        style={[styles.confirmText, { color: colors.error }]}
+                      >
+                        Delete this user?
+                      </Text>
                       <TouchableOpacity
                         onPress={() => dispatch(removeUser(user.id))}
-                        style={[styles.confirmButton, { backgroundColor: colors.error }]}
+                        style={[
+                          styles.confirmButton,
+                          { backgroundColor: colors.error },
+                        ]}
                       >
-                        <Text style={styles.confirmButtonText}>Yes, delete</Text>
+                        <Text style={styles.confirmButtonText}>
+                          Yes, delete
+                        </Text>
                       </TouchableOpacity>
-                      <TouchableOpacity onPress={() => setConfirmDeleteId(null)}>
-                        <Text style={[styles.cancelText, { color: colors.textMuted }]}>Cancel</Text>
+                      <TouchableOpacity
+                        onPress={() => setConfirmDeleteId(null)}
+                      >
+                        <Text
+                          style={[
+                            styles.cancelText,
+                            { color: colors.textMuted },
+                          ]}
+                        >
+                          Cancel
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   ) : (
                     <View style={styles.actionsRow}>
-                      <TouchableOpacity onPress={() => startEdit(user)} style={styles.iconButton}>
-                        <Text style={[styles.iconButtonText, { color: colors.primary }]}>Edit</Text>
+                      <TouchableOpacity
+                        onPress={() => startEdit(user)}
+                        style={styles.iconButton}
+                      >
+                        <Text
+                          style={[
+                            styles.iconButtonText,
+                            { color: colors.primary },
+                          ]}
+                        >
+                          Edit
+                        </Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         onPress={() => setConfirmDeleteId(user.id)}
                         style={styles.iconButton}
                       >
-                        <Text style={[styles.iconButtonText, { color: colors.error }]}>Delete</Text>
+                        <Text
+                          style={[
+                            styles.iconButtonText,
+                            { color: colors.error },
+                          ]}
+                        >
+                          Delete
+                        </Text>
                       </TouchableOpacity>
                     </View>
                   )}
@@ -186,7 +288,9 @@ export default function AdminUsersScreen() {
         })}
 
         {status === 'succeeded' && users.length === 0 && (
-          <Text style={[styles.empty, { color: colors.textMuted }]}>No users found.</Text>
+          <Text style={[styles.empty, { color: colors.textMuted }]}>
+            No users found.
+          </Text>
         )}
       </ScrollView>
     </SpaceBackground>

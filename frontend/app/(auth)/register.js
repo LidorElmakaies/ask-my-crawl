@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import CountrySelect from '../../src/components/CountrySelect';
@@ -34,15 +40,22 @@ export default function RegisterScreen() {
   const { status, error } = useSelector((state) => state.auth);
   const { colors } = useAppTheme();
 
-  const emailError = email.trim().length > 0 && !isValidEmail(email) ? 'Enter a valid email address' : null;
+  const emailError =
+    email.trim().length > 0 && !isValidEmail(email)
+      ? 'Enter a valid email address'
+      : null;
   const phoneError =
-    phoneNumber.trim().length > 0 && !isValidPhoneForCountry(phoneCountry, phoneNumber)
+    phoneNumber.trim().length > 0 &&
+    !isValidPhoneForCountry(phoneCountry, phoneNumber)
       ? getPhoneErrorMessage(phoneCountry, phoneNumber)
       : null;
   const passwordError = getPasswordError(password);
 
   const canSubmit =
-    email.trim().length > 0 && isValidEmail(email) && !passwordError && !phoneError;
+    email.trim().length > 0 &&
+    isValidEmail(email) &&
+    !passwordError &&
+    !phoneError;
 
   const handleSubmit = () => {
     setSubmitAttempted(true);
@@ -52,16 +65,23 @@ export default function RegisterScreen() {
         email: email.trim(),
         password,
         name: name.trim() || undefined,
-        phoneNumber: phoneNumber.trim() ? toE164(phoneCountry, phoneNumber) : undefined,
-      })
+        phoneNumber: phoneNumber.trim()
+          ? toE164(phoneCountry, phoneNumber)
+          : undefined,
+      }),
     );
   };
 
   return (
     <SpaceBackground>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.header}>
-          <Text style={[styles.heading, { color: colors.text }]}>Create account</Text>
+          <Text style={[styles.heading, { color: colors.text }]}>
+            Create account
+          </Text>
           <Text style={[styles.subheading, { color: colors.textMuted }]}>
             Register to get started
           </Text>
@@ -97,10 +117,15 @@ export default function RegisterScreen() {
                 Phone (optional)
               </Text>
               <View style={styles.phoneRow}>
-                <CountrySelect value={phoneCountry} onChange={setPhoneCountry} />
+                <CountrySelect
+                  value={phoneCountry}
+                  onChange={setPhoneCountry}
+                />
                 <InputField
                   value={phoneNumber}
-                  onChangeText={(text) => setPhoneNumber(formatNationalNumber(phoneCountry, text))}
+                  onChangeText={(text) =>
+                    setPhoneNumber(formatNationalNumber(phoneCountry, text))
+                  }
                   placeholder={phoneCountry.example}
                   keyboardType="phone-pad"
                   error={submitAttempted ? phoneError : null}
@@ -123,11 +148,18 @@ export default function RegisterScreen() {
           <View
             style={[
               styles.feedback,
-              { backgroundColor: colors.errorBg, borderColor: colors.errorBorder },
+              {
+                backgroundColor: colors.errorBg,
+                borderColor: colors.errorBorder,
+              },
             ]}
           >
-            <Text style={[styles.feedbackTitle, { color: colors.error }]}>✗ Error</Text>
-            <Text style={[styles.feedbackBody, { color: colors.text }]}>{error}</Text>
+            <Text style={[styles.feedbackTitle, { color: colors.error }]}>
+              ✗ Error
+            </Text>
+            <Text style={[styles.feedbackBody, { color: colors.text }]}>
+              {error}
+            </Text>
           </View>
         )}
 
@@ -140,7 +172,9 @@ export default function RegisterScreen() {
         >
           <Text style={[styles.switchText, { color: colors.textMuted }]}>
             Already have an account?{' '}
-            <Text style={[styles.switchTextBold, { color: colors.primary }]}>Log in</Text>
+            <Text style={[styles.switchTextBold, { color: colors.primary }]}>
+              Log in
+            </Text>
           </Text>
         </TouchableOpacity>
       </ScrollView>

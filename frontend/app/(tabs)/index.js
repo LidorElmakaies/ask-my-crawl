@@ -46,7 +46,8 @@ export default function HomeScreen() {
           </LinearGradient>
 
           <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-            Extract structured data from any URL{'\n'}and send it to your backend pipeline.
+            Extract structured data from any URL{'\n'}and send it to your
+            backend pipeline.
           </Text>
 
           {/* Feature dots */}
@@ -63,9 +64,14 @@ export default function HomeScreen() {
                 ]}
               >
                 <View
-                  style={[styles.featureDot, { backgroundColor: colors.primary }]}
+                  style={[
+                    styles.featureDot,
+                    { backgroundColor: colors.primary },
+                  ]}
                 />
-                <Text style={[styles.featureText, { color: colors.text }]}>{f}</Text>
+                <Text style={[styles.featureText, { color: colors.text }]}>
+                  {f}
+                </Text>
               </View>
             ))}
           </View>

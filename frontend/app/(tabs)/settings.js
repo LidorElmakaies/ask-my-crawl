@@ -27,7 +27,9 @@ export default function SettingsScreen() {
     <SpaceBackground>
       <View style={styles.container}>
         <Text style={[styles.heading, { color: colors.text }]}>Settings</Text>
-        <Text style={[styles.section, { color: colors.textMuted }]}>Appearance</Text>
+        <Text style={[styles.section, { color: colors.textMuted }]}>
+          Appearance
+        </Text>
 
         {/* Toggle pill */}
         <TouchableOpacity
@@ -85,7 +87,13 @@ export default function SettingsScreen() {
           </Text>
         )}
 
-        <Text style={[styles.section, styles.connectionSection, { color: colors.textMuted }]}>
+        <Text
+          style={[
+            styles.section,
+            styles.connectionSection,
+            { color: colors.textMuted },
+          ]}
+        >
           Server connection
         </Text>
         <GlowCard>
@@ -95,22 +103,40 @@ export default function SettingsScreen() {
           <ConnectionStatus status={status} />
         </GlowCard>
 
-        <Text style={[styles.section, styles.connectionSection, { color: colors.textMuted }]}>
+        <Text
+          style={[
+            styles.section,
+            styles.connectionSection,
+            { color: colors.textMuted },
+          ]}
+        >
           Account
         </Text>
         <GlowCard>
           {confirmingLogout ? (
             <View style={styles.confirmRow}>
-              <Text style={[styles.confirmText, { color: colors.text }]}>Log out of your account?</Text>
+              <Text style={[styles.confirmText, { color: colors.text }]}>
+                Log out of your account?
+              </Text>
               <View style={styles.confirmActions}>
                 <TouchableOpacity
                   onPress={logout}
-                  style={[styles.confirmButton, { backgroundColor: colors.error }]}
+                  style={[
+                    styles.confirmButton,
+                    { backgroundColor: colors.error },
+                  ]}
                 >
                   <Text style={styles.confirmButtonText}>Log Out</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setConfirmingLogout(false)} style={styles.cancelButton}>
-                  <Text style={[styles.cancelText, { color: colors.textMuted }]}>Cancel</Text>
+                <TouchableOpacity
+                  onPress={() => setConfirmingLogout(false)}
+                  style={styles.cancelButton}
+                >
+                  <Text
+                    style={[styles.cancelText, { color: colors.textMuted }]}
+                  >
+                    Cancel
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -121,7 +147,9 @@ export default function SettingsScreen() {
               activeOpacity={0.7}
             >
               <Ionicons name="log-out-outline" size={20} color={colors.error} />
-              <Text style={[styles.logoutText, { color: colors.error }]}>Log Out</Text>
+              <Text style={[styles.logoutText, { color: colors.error }]}>
+                Log Out
+              </Text>
             </TouchableOpacity>
           )}
         </GlowCard>

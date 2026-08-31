@@ -6,7 +6,10 @@ import { ThemeAnimProvider } from '../src/context/ThemeAnimContext';
 import ThemeProvider from '../src/components/ThemeProvider';
 import { persistor, store } from '../src/store';
 import { clearAuth } from '../src/store/slices/authSlice';
-import { connectWebSocket, disconnectWebSocket } from '../src/store/slices/wsSlice';
+import {
+  connectWebSocket,
+  disconnectWebSocket,
+} from '../src/store/slices/wsSlice';
 import { isTokenExpired, msUntilExpiry } from '../src/utils/jwt';
 
 // Connects/disconnects the WS as soon as a token becomes available/unavailable — app-wide, not
@@ -47,7 +50,10 @@ function AuthGate() {
       dispatch(clearAuth());
       return;
     }
-    const timer = setTimeout(() => dispatch(clearAuth()), msUntilExpiry(accessToken));
+    const timer = setTimeout(
+      () => dispatch(clearAuth()),
+      msUntilExpiry(accessToken),
+    );
     return () => clearTimeout(timer);
   }, [accessToken, dispatch]);
 

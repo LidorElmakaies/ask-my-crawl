@@ -1,0 +1,30 @@
+{
+  "name": "ask-my-crawl",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A web scraping tool that crawls a URL, answers a question about its content using AI, and notifies you by email and SMS when it's done.",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LidorElmakaies/ask-my-crawl.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/LidorElmakaies/ask-my-crawl/issues"
+  },
+  "homepage": "https://github.com/LidorElmakaies/ask-my-crawl#readme",
+  "lint-staged": {
+    "backend/{apps,libs}/**/*.ts": "npx --prefix backend prettier --write",
+    "frontend/{app,src}/**/*.js": "npx --prefix frontend prettier --write"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7",
+    "lint-staged": "^17.4.1"
+  }
+}

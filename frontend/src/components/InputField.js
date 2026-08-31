@@ -1,5 +1,11 @@
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
@@ -28,11 +34,17 @@ export default function InputField({
   const [focused, setFocused] = useState(false);
   const [reveal, setReveal] = useState(false);
 
-  const borderColor = error ? colors.error : focused ? colors.inputFocusBorder : colors.inputBorder;
+  const borderColor = error
+    ? colors.error
+    : focused
+      ? colors.inputFocusBorder
+      : colors.inputBorder;
 
   return (
     <View style={[styles.wrapper, style]}>
-      {label ? <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text> : null}
+      {label ? (
+        <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
+      ) : null}
       <View style={styles.inputRow}>
         <TextInput
           value={value}
@@ -47,7 +59,11 @@ export default function InputField({
           style={[
             styles.input,
             isPassword && styles.inputWithToggle,
-            { backgroundColor: colors.inputBg, borderColor, color: colors.text },
+            {
+              backgroundColor: colors.inputBg,
+              borderColor,
+              color: colors.text,
+            },
           ]}
         />
         {isPassword ? (
@@ -64,7 +80,9 @@ export default function InputField({
           </TouchableOpacity>
         ) : null}
       </View>
-      {error ? <Text style={[styles.error, { color: colors.error }]}>{error}</Text> : null}
+      {error ? (
+        <Text style={[styles.error, { color: colors.error }]}>{error}</Text>
+      ) : null}
     </View>
   );
 }

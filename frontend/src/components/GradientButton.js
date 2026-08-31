@@ -1,8 +1,19 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+} from 'react-native';
 import { useAppTheme } from '../hooks/useAppTheme';
 
-export default function GradientButton({ label, onPress, loading, disabled, style }) {
+export default function GradientButton({
+  label,
+  onPress,
+  loading,
+  disabled,
+  style,
+}) {
   const { colors } = useAppTheme();
 
   return (

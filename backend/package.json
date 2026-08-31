@@ -14,6 +14,7 @@
     "build:indexer": "npm run build:libs && nest build indexer && tsc-alias -p tsconfig.json",
     "build": "npm run build:libs && nest build gateway && nest build auth && nest build job-manager && nest build scraper && nest build indexer && tsc-alias -p tsconfig.json",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "format:check": "prettier --check \"apps/**/*.ts\" \"libs/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",

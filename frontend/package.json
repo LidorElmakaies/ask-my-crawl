@@ -33,7 +33,12 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build:web": "expo export --platform web --output-dir dist"
+    "build:web": "expo export --platform web --output-dir dist",
+    "format": "prettier --write \"app/**/*.js\" \"src/**/*.js\" \"*.js\"",
+    "format:check": "prettier --check \"app/**/*.js\" \"src/**/*.js\" \"*.js\""
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "prettier": "^3.9.6"
+  }
 }

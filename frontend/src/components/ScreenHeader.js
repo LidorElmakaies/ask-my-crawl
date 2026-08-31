@@ -13,7 +13,9 @@ export default function ScreenHeader({ title, subtitle, style }) {
     <View style={[styles.header, style]}>
       <Text style={[styles.heading, { color: colors.text }]}>{title}</Text>
       {subtitle ? (
-        <Text style={[styles.subheading, { color: colors.textMuted }]}>{subtitle}</Text>
+        <Text style={[styles.subheading, { color: colors.textMuted }]}>
+          {subtitle}
+        </Text>
       ) : null}
     </View>
   );

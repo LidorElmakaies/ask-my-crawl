@@ -50,10 +50,12 @@ export const connectWebSocket = createAsyncThunk(
   },
 );
 
-
-export const disconnectWebSocket = createAsyncThunk('ws/disconnect', async () => {
-  socketService.disconnect();
-});
+export const disconnectWebSocket = createAsyncThunk(
+  'ws/disconnect',
+  async () => {
+    socketService.disconnect();
+  },
+);
 
 const wsSlice = createSlice({
   name: 'ws',
@@ -71,7 +73,8 @@ const wsSlice = createSlice({
       // A manual disconnectWebSocket() call reports 'io client disconnect' — anything else
       // means Socket.IO is auto-retrying in the background, so reflect that as 'connecting'
       // rather than a dead-end 'disconnected'.
-      state.status = action.payload === 'io client disconnect' ? 'idle' : 'connecting';
+      state.status =
+        action.payload === 'io client disconnect' ? 'idle' : 'connecting';
     },
     wsConnectError(state, action) {
       state.status = 'error';
@@ -100,5 +103,6 @@ const wsSlice = createSlice({
   },
 });
 
-const { wsConnected, wsDisconnected, wsConnectError, wsMessageReceived } = wsSlice.actions;
+const { wsConnected, wsDisconnected, wsConnectError, wsMessageReceived } =
+  wsSlice.actions;
 export default wsSlice.reducer;

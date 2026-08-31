@@ -10,7 +10,10 @@ let socket = null;
  * Opens the connection and wires the given callbacks to Socket.IO's events. Returns nothing —
  * callers observe the connection through the callbacks, not by holding the socket themselves.
  */
-export function connect(token, { onConnect, onDisconnect, onConnectError, onMessage } = {}) {
+export function connect(
+  token,
+  { onConnect, onDisconnect, onConnectError, onMessage } = {},
+) {
   if (socket) {
     socket.disconnect();
   }

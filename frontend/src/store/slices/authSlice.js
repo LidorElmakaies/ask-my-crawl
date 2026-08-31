@@ -12,7 +12,7 @@ export const registerUser = createAsyncThunk(
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 export const loginUser = createAsyncThunk(
@@ -23,7 +23,7 @@ export const loginUser = createAsyncThunk(
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 const authSlice = createSlice({

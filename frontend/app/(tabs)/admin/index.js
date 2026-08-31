@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Linking, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Linking,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useSelector } from 'react-redux';
 import GlowCard from '../../../src/components/GlowCard';
 import SpaceBackground from '../../../src/components/SpaceBackground';
@@ -73,25 +80,47 @@ export default function AdminDashboardScreen() {
   return (
     <SpaceBackground>
       <View style={styles.container}>
-        <Text style={[styles.heading, { color: colors.text }]}>Admin Dashboard</Text>
+        <Text style={[styles.heading, { color: colors.text }]}>
+          Admin Dashboard
+        </Text>
         <Text style={[styles.subheading, { color: colors.textMuted }]}>
           Manage users and reach the observability stack
         </Text>
 
         <View style={styles.tiles}>
           {TILES.map((tile) => (
-            <TouchableOpacity key={tile.key} onPress={() => openTile(tile)} activeOpacity={0.85}>
+            <TouchableOpacity
+              key={tile.key}
+              onPress={() => openTile(tile)}
+              activeOpacity={0.85}
+            >
               <GlowCard style={styles.tileCard}>
-                <View style={[styles.iconWrapper, { backgroundColor: colors.orbBg }]}>
+                <View
+                  style={[
+                    styles.iconWrapper,
+                    { backgroundColor: colors.orbBg },
+                  ]}
+                >
                   <Ionicons name={tile.icon} size={24} color={colors.primary} />
                 </View>
                 <View style={styles.tileText}>
-                  <Text style={[styles.tileLabel, { color: colors.text }]}>{tile.label}</Text>
-                  <Text style={[styles.tileDescription, { color: colors.textMuted }]}>
+                  <Text style={[styles.tileLabel, { color: colors.text }]}>
+                    {tile.label}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.tileDescription,
+                      { color: colors.textMuted },
+                    ]}
+                  >
                     {tile.description}
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.textMuted}
+                />
               </GlowCard>
             </TouchableOpacity>
           ))}

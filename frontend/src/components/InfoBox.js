@@ -5,10 +5,26 @@ import { useAppTheme } from '../hooks/useAppTheme';
 // variant -> themed background/border/accent color triple, keyed off the exact useAppTheme()
 // tokens each hand-rolled box already used.
 const VARIANTS = {
-  query: (colors) => ({ background: colors.inputBg, border: colors.inputBorder, accent: colors.textMuted }),
-  success: (colors) => ({ background: colors.successBg, border: colors.successBorder, accent: colors.success }),
-  pending: (colors) => ({ background: colors.card, border: colors.cardBorder, accent: colors.primary }),
-  error: (colors) => ({ background: colors.errorBg, border: colors.errorBorder, accent: colors.error }),
+  query: (colors) => ({
+    background: colors.inputBg,
+    border: colors.inputBorder,
+    accent: colors.textMuted,
+  }),
+  success: (colors) => ({
+    background: colors.successBg,
+    border: colors.successBorder,
+    accent: colors.success,
+  }),
+  pending: (colors) => ({
+    background: colors.card,
+    border: colors.cardBorder,
+    accent: colors.primary,
+  }),
+  error: (colors) => ({
+    background: colors.errorBg,
+    border: colors.errorBorder,
+    accent: colors.error,
+  }),
 };
 
 /**
@@ -36,13 +52,23 @@ export default function InfoBox({
   const { colors } = useAppTheme();
   const { background, border, accent } = VARIANTS[variant](colors);
 
-  const body = children ?? (text ? (
-    <Text style={[styles.text, { color: colors.text }, textStyle]}>{text}</Text>
-  ) : null);
+  const body =
+    children ??
+    (text ? (
+      <Text style={[styles.text, { color: colors.text }, textStyle]}>
+        {text}
+      </Text>
+    ) : null);
 
   if (row) {
     return (
-      <View style={[styles.rowContainer, { backgroundColor: background, borderColor: border }, style]}>
+      <View
+        style={[
+          styles.rowContainer,
+          { backgroundColor: background, borderColor: border },
+          style,
+        ]}
+      >
         {icon ? <Ionicons name={icon} size={16} color={accent} /> : null}
         {body}
       </View>
@@ -50,11 +76,19 @@ export default function InfoBox({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor: background, borderColor: border }, style]}>
+    <View
+      style={[
+        styles.container,
+        { backgroundColor: background, borderColor: border },
+        style,
+      ]}
+    >
       {label ? (
         <View style={styles.labelRow}>
           {icon ? <Ionicons name={icon} size={16} color={accent} /> : null}
-          <Text style={[styles.label, { color: accent }, labelStyle]}>{label}</Text>
+          <Text style={[styles.label, { color: accent }, labelStyle]}>
+            {label}
+          </Text>
         </View>
       ) : null}
       {body}

@@ -50,7 +50,12 @@ export default function AdminWebViewScreen() {
       )}
 
       {loading && !error && (
-        <View style={[styles.loadingOverlay, { backgroundColor: colors.bg?.[0] ?? '#000' }]}>
+        <View
+          style={[
+            styles.loadingOverlay,
+            { backgroundColor: colors.bg?.[0] ?? '#000' },
+          ]}
+        >
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       )}

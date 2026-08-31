@@ -33,19 +33,29 @@ export default function EmptyState({
   const isLeft = align === 'left';
 
   return (
-    <GlowCard style={[isLeft ? styles.leftContainer : styles.centerContainer, style]}>
+    <GlowCard
+      style={[isLeft ? styles.leftContainer : styles.centerContainer, style]}
+    >
       {isLeft ? (
         <View style={styles.headerRow}>
-          {icon ? <Ionicons name={icon} size={iconSize} color={resolvedIconColor} /> : null}
+          {icon ? (
+            <Ionicons name={icon} size={iconSize} color={resolvedIconColor} />
+          ) : null}
           {title ? (
-            <Text style={[styles.leftTitle, { color: resolvedTitleColor }]}>{title}</Text>
+            <Text style={[styles.leftTitle, { color: resolvedTitleColor }]}>
+              {title}
+            </Text>
           ) : null}
         </View>
       ) : (
         <>
-          {icon ? <Ionicons name={icon} size={iconSize} color={resolvedIconColor} /> : null}
+          {icon ? (
+            <Ionicons name={icon} size={iconSize} color={resolvedIconColor} />
+          ) : null}
           {title ? (
-            <Text style={[styles.centerTitle, { color: resolvedTitleColor }]}>{title}</Text>
+            <Text style={[styles.centerTitle, { color: resolvedTitleColor }]}>
+              {title}
+            </Text>
           ) : null}
         </>
       )}
@@ -65,7 +75,9 @@ export default function EmptyState({
           style={[styles.actionBtn, { backgroundColor: colors.primary }]}
           activeOpacity={0.8}
         >
-          <Text style={[styles.actionText, { color: colors.onPrimary }]}>{actionLabel}</Text>
+          <Text style={[styles.actionText, { color: colors.onPrimary }]}>
+            {actionLabel}
+          </Text>
         </TouchableOpacity>
       ) : null}
     </GlowCard>

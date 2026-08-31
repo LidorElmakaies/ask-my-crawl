@@ -1,5 +1,13 @@
 import { useState } from 'react';
-import { FlatList, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { PHONE_COUNTRIES } from '../utils/phoneCountries';
 
@@ -28,13 +36,23 @@ export default function CountrySelect({ value, onChange, style }) {
         </Text>
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpen(false)}
+      >
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
           <Pressable
-            style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.cardBorder }]}
+            style={[
+              styles.sheet,
+              { backgroundColor: colors.card, borderColor: colors.cardBorder },
+            ]}
             onPress={() => {}} // swallow taps so they don't fall through to the backdrop's close
           >
-            <Text style={[styles.sheetTitle, { color: colors.textMuted }]}>Country</Text>
+            <Text style={[styles.sheetTitle, { color: colors.textMuted }]}>
+              Country
+            </Text>
             <FlatList
               data={PHONE_COUNTRIES}
               keyExtractor={(item) => item.code}
@@ -52,7 +70,9 @@ export default function CountrySelect({ value, onChange, style }) {
                     ]}
                   >
                     <Text style={styles.rowFlag}>{item.flag}</Text>
-                    <Text style={[styles.rowName, { color: colors.text }]}>{item.name}</Text>
+                    <Text style={[styles.rowName, { color: colors.text }]}>
+                      {item.name}
+                    </Text>
                     <Text style={[styles.rowCode, { color: colors.textMuted }]}>
                       +{item.callingCode}
                     </Text>

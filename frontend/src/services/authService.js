@@ -9,7 +9,13 @@ import { parseErrorMessage } from './apiError';
 // doesn't proxy /auth/* yet (docs/specs/services.md). Bodies are snake_case exactly as
 // docs/specs/api-contracts.md documents; not translated case client-side.
 
-export async function register({ email, password, name, phoneNumber, telegramChatId }) {
+export async function register({
+  email,
+  password,
+  name,
+  phoneNumber,
+  telegramChatId,
+}) {
   const response = await fetch(`${URLS.auth.origin}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

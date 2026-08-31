@@ -15,7 +15,10 @@ import InfoBox from '../../src/components/InfoBox';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
-import { clearJobsError, submitJobRequest } from '../../src/store/slices/jobsSlice';
+import {
+  clearJobsError,
+  submitJobRequest,
+} from '../../src/store/slices/jobsSlice';
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
@@ -48,7 +51,6 @@ export default function ScraperScreen() {
     dispatch(clearJobsError());
   };
 
-
   return (
     <SpaceBackground>
       <ScrollView
@@ -63,7 +65,9 @@ export default function ScraperScreen() {
 
         <GlowCard>
           {/* Label */}
-          <Text style={[styles.label, { color: colors.textMuted }]}>TARGET URL</Text>
+          <Text style={[styles.label, { color: colors.textMuted }]}>
+            TARGET URL
+          </Text>
 
           {/* Input */}
           <TextInput
@@ -71,7 +75,9 @@ export default function ScraperScreen() {
               styles.input,
               {
                 backgroundColor: colors.inputBg,
-                borderColor: focused ? colors.inputFocusBorder : colors.inputBorder,
+                borderColor: focused
+                  ? colors.inputFocusBorder
+                  : colors.inputBorder,
                 color: colors.text,
                 shadowColor: focused ? colors.primary : 'transparent',
                 shadowOpacity: 0.4,
@@ -99,7 +105,9 @@ export default function ScraperScreen() {
               styles.queryInput,
               {
                 backgroundColor: colors.inputBg,
-                borderColor: queryFocused ? colors.inputFocusBorder : colors.inputBorder,
+                borderColor: queryFocused
+                  ? colors.inputFocusBorder
+                  : colors.inputBorder,
                 color: colors.text,
                 shadowColor: queryFocused ? colors.primary : 'transparent',
                 shadowOpacity: 0.4,
@@ -133,14 +141,17 @@ export default function ScraperScreen() {
               ✓ Request Accepted
             </Text>
             <Text style={[styles.feedbackBody, { color: colors.text }]}>
-              Your crawl job has been queued. You can monitor the progress and view the answer live in the History tab.
+              Your crawl job has been queued. You can monitor the progress and
+              view the answer live in the History tab.
             </Text>
             <TouchableOpacity
               onPress={() => router.push('/(tabs)/history')}
               style={[styles.historyBtn, { backgroundColor: colors.primary }]}
               activeOpacity={0.8}
             >
-              <Text style={[styles.historyBtnText, { color: colors.onPrimary }]}>
+              <Text
+                style={[styles.historyBtnText, { color: colors.onPrimary }]}
+              >
                 View in History
               </Text>
             </TouchableOpacity>
@@ -166,7 +177,6 @@ export default function ScraperScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
-
     </SpaceBackground>
   );
 }
@@ -241,4 +251,3 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
-

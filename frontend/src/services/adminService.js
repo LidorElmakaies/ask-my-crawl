@@ -20,5 +20,7 @@ export async function updateUser(token, id, patch) {
 
 export async function deleteUser(token, id) {
   // 204, no body — nothing to parse.
-  await authorizedFetch(`${URLS.admin.users}/${id}`, token, { method: 'DELETE' });
+  await authorizedFetch(`${URLS.admin.users}/${id}`, token, {
+    method: 'DELETE',
+  });
 }

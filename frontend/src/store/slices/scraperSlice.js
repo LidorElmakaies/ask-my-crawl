@@ -9,7 +9,7 @@ export const submitScrapeRequest = createAsyncThunk(
     } catch (err) {
       return rejectWithValue(err.message);
     }
-  }
+  },
 );
 
 const scraperSlice = createSlice({
