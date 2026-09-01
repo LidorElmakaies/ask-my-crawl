@@ -49,8 +49,8 @@ function stripFragment(url: string): string {
 }
 ```
 
-This is the only transform applied before computing the Redis dedup key
-(`SADD crawl:{job_id}:visited`) and the SeaweedFS blob key (`sha256(stripFragment(url))`).
+This is the only transform applied before computing the BullMQ dedup `jobId`
+(`sha256(job_id + ":" + url)`, see §4) and the SeaweedFS blob key (`sha256(stripFragment(url))`).
 
 ## 3. Same-domain link filter
 
@@ -83,12 +83,35 @@ filter in §5c, the `crawl-complete` payload in §6) reads it straight off the m
 holding — no separate Redis-stored job-meta hash, no synchronous call back to Job Manager Service.
 
 1. `stripFragment(url)`.
-2. `SADD crawl:{job_id}:visited <url>` — Redis `SADD` returns whether the member was newly added;
-   this single atomic op **is** the dedup gate. If it was already a member, drop the message here,
-   no further action — this makes redelivery of the same message (Kafka at-least-once, a retry,
-   whatever) harmless.
-3. If newly added: `INCR job:{job_id}:pending_scrape`, then enqueue onto `process-url` (BullMQ)
-   with `{job_id, user_id, url, depth, query, base_url}`.
+2. `queue.alreadyClaimed(job_id, url)` — checks whether a `process-url` BullMQ job already exists
+   for this exact `(job_id, url)` pair (its `jobId` is `sha256(job_id + ":" + url)`, fixed rather
+   than auto-generated). If it already exists — still queued/active, or completed/failed within
+   the retention window — drop the message here, no further action.
+3. If not already claimed: `SADD job:{job_id}:pending_scrape <url>`, then enqueue onto
+   `process-url` (BullMQ, same fixed `jobId`) with `{job_id, user_id, url, depth, query,
+   base_url}`.
+
+**Why the dedup gate is the BullMQ job, not a separate `SADD ... visited` marker**: an earlier
+version of this design used exactly that — `SADD crawl:{job_id}:visited <url>` first, then the
+counter increment and enqueue. That marker is a real correctness hazard: if this consumer crashes
+*after* the SADD succeeds but *before* the enqueue completes, the URL is permanently marked
+"visited" but was never actually queued or counted. Kafka redelivers the message (at-least-once),
+but the handler's very first move is checking that marker — sees it's already set, returns early,
+and never finishes the claim. The marker doesn't just fail to help recovery, it actively blocks
+it. Worse, if the crash lands after the counter increment specifically, `pending_scrape` can never
+reach zero for that job — `crawl-complete` never fires, and the whole job (not just that one URL)
+hangs forever with no notification and no automatic recovery.
+Checking `queue.getJob()` instead of a separate marker avoids this because it asks about the
+*actual* state (does the claim exist yet?) rather than a proxy for it recorded earlier — a retry
+after a crash re-derives the true answer instead of trusting a marker that may have outlived the
+work it was meant to gate. `pending_scrape` is a Set (member = "currently outstanding"), not a
+counter, so add/remove are themselves idempotent under redelivery too — the full sequence (check →
+add → enqueue) is safe to repeat from any crash point. The `jobId` must be scoped to
+`job_id + url`, not the URL alone: `process-url` is one shared queue for the deployment's whole
+lifetime, and BullMQ retains finished job records indefinitely unless told otherwise
+(`removeOnComplete`/`removeOnFail`, bounded here to `JOB_KEY_TTL_SECONDS` — the same window the
+Redis coordination keys use), so a URL-only id would make a URL scrapable at most once, ever,
+across every future unrelated crawl job.
 
 This consumer does no fetching and no domain filtering — same-domain/depth filtering already
 happened upstream (Scraper Worker only re-publishes URLs that already passed both checks), so
@@ -109,9 +132,9 @@ use case; the steps below are that use case's logic.
 3. **On a permanent failure** (any 4xx — 404, 410, 403, etc.): terminal immediately, **no retry**.
    Retrying a "this page doesn't exist" response wastes the attempt budget on something that will
    never succeed.
-4. **Terminal failure (either kind)**: `SADD job:{job_id}:failed <url>`, decrement
-   `job:{job_id}:pending_scrape` (no completion check here — see §6), stop — no children expansion
-   for a page that was never fetched.
+4. **Terminal failure (either kind)**: `SADD job:{job_id}:failed <url>`, `SREM`
+   `job:{job_id}:pending_scrape <url>` (no completion check here — see §6), stop — no children
+   expansion for a page that was never fetched.
 5. **On success**, branch on the response's `Content-Type` — a switch/strategy dispatch, not an
    if/else, so adding a new content type later is one new case, not a rewrite:
    ```ts
@@ -146,13 +169,13 @@ use case; the steps below are that use case's logic.
       page). `base_url` rides this message too, same reasoning as §4 — `crawl-complete`'s `url`
       field must always mean the job's seed URL, and the Indexer is the one that eventually
       publishes it.
-   f. `SADD job:{job_id}:succeeded <url>`, decrement `job:{job_id}:pending_scrape` (no completion
+   f. `SADD job:{job_id}:succeeded <url>`, `SREM job:{job_id}:pending_scrape <url>` (no completion
       check here — see §6).
 
 ## 6. Completion detection
 
 **Only the Indexer's Indexing Worker checks for job completion or publishes `crawl-complete`** — the
-Scraper's own decrement (§5 step 4/6f) never checks `pending_index` or checks for completion at all.
+Scraper's own `SREM` (§5 step 4/6f) never checks `pending_index` or checks for completion at all.
 This is necessary, not just simpler: `page-scraped`'s delivery from the Scraper to the Indexer is
 asynchronous (produce now, consumed whenever the Indexer's Kafka consumer gets to it), so a
 Scraper-side completion check could observe `pending_index` as 0 simply because the Indexer hasn't
@@ -162,10 +185,11 @@ incremented it yet for that page, not because indexing is actually done — for 
 indexed and searchable, not merely scraped, so only the side that knows indexing is finished may
 declare completion.
 
-After an Indexing Worker finishes its own step (§7) and decrements `pending_index`, it checks:
+After an Indexing Worker finishes its own step (§7) and removes the page from `pending_index`, it
+checks:
 
 ```ts
-if (pending_scrape === 0 && pending_index === 0) {
+if (SCARD(pending_scrape) === 0 && SCARD(pending_index) === 0) {
   const wonRace = await redis.set(`job:${job_id}:notified`, '1', { NX: true });
   if (wonRace) {
     // publish crawl-complete — build the payload from job:{job_id}:succeeded / :failed
@@ -173,11 +197,11 @@ if (pending_scrape === 0 && pending_index === 0) {
 }
 ```
 
-`SET NX` still guards exactly-once delivery even with a single caller: at-least-once Kafka
-redelivery of the same `page-scraped` message could otherwise decrement `pending_index` twice for
-one page, letting two different Indexing Worker calls both observe zero-zero for the same job. Only
-the one that wins the `SET` publishes `crawl-complete`. The winner reads
-`job:{job_id}:succeeded`/`:failed` (Sets) to build the full payload:
+`SET NX` still guards exactly-once delivery even with a single caller: two different Indexing
+Worker calls could still both observe zero-zero for the same job in the narrow window between one
+finishing its `SREM` and reading these two cardinalities (e.g. two different pages of the same job
+finishing indexing back-to-back). Only the one that wins the `SET` publishes `crawl-complete`. The
+winner reads `job:{job_id}:succeeded`/`:failed` (Sets) to build the full payload:
 
 ```jsonc
 {
@@ -201,21 +225,24 @@ inspection window, no indefinite growth.
 Mirrors the Scraper's shape, per this file's own §1 diagram and Redis coordination state.
 
 - **Index Intake Consumer** (API layer) — consumes `page-scraped`, bridges each message onto
-  `index-page` (BullMQ), same Kafka→BullMQ bridge pattern as the Frontier Consumer. On enqueue:
-  `INCR job:{job_id}:pending_index`. No dedup gate — unlike `crawl-frontier`'s messages, a
-  `page-scraped` message is never a rediscovery of an already-seen URL, so there's nothing to dedup
-  against (at-least-once Kafka redelivery double-counting `pending_index` is a known, accepted
-  POC-level gap, not solved here).
+  `index-page` (BullMQ), same Kafka→BullMQ bridge pattern as the Frontier Consumer, same dedup gate
+  too: `queue.alreadyClaimed(job_id, normalizedUrl)` (backed by an `index-page` job whose `jobId`
+  is fixed per `job_id`+`normalizedUrl`) before `SADD job:{job_id}:pending_index <url>` and enqueue.
+  Unlike `crawl-frontier`'s messages, a `page-scraped` message is never a legitimate rediscovery of
+  an already-seen URL — the gate here exists purely to absorb Kafka's at-least-once redelivery and
+  crash-mid-handler retries, both of which used to double-count `pending_index` (previously called
+  out as a known, accepted POC-level gap; the same BullMQ-jobId mechanism that fixes the Scraper's
+  crash-window bug in §4 closes this one too, as a side effect).
 - **Indexing Worker(s)** (API layer, BullMQ workers on `index-page`) — fetch the raw HTML blob from
   SeaweedFS by `blobKey`, strip it to plain text (`cheerio`), chunk it
   (`RecursiveCharacterTextSplitter` from `@langchain/textsplitters`, 1000/200 size/overlap — an
   unremarkable starting point, not tuned against real answer quality yet), embed it (any
   OpenAI-compatible embedding server via `OpenAIEmbeddings` from `@langchain/openai`, currently a
   self-hosted LM Studio instance — swappable via `EMBEDDING_BASE_URL`, no code change), delete any
-  stale vectors for that `url` from Qdrant, upsert the new chunks. Then decrement
-  `job:{job_id}:pending_index` and run the same completion check (§6) — using its own scoped copy of
-  the Redis coordination logic, not the Scraper's (see `data-model.md`'s Redis section for why these
-  stay independent copies).
+  stale vectors for that `url` from Qdrant, upsert the new chunks. Then `SREM`
+  `job:{job_id}:pending_index <url>` and run the same completion check (§6) — using its own scoped
+  copy of the Redis coordination logic, not the Scraper's (see `data-model.md`'s Redis section for
+  why these stay independent copies).
 - **Qdrant collection schema**: 768-dim vector field (`text-embedding-nomic-embed-text-v1.5` by
   default, both env-configurable), `HNSW`/`COSINE` index (built automatically as part of collection
   creation), payload fields `job_id`/`user_id`/`url`/`query`/`chunk_index`/`scraped_at`/`text` (the

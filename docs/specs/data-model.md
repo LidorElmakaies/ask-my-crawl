@@ -168,27 +168,34 @@ CREATE INDEX ON notifications_log (user_id);
 ## Redis
 
 **Implemented** (`devops/redis`, one shared instance — used by both the Scraper and the Indexer,
-never one per service). Per-job coordination state shared between the Scraper and the Indexer
-(dedup set, two pending-work counters, completion guard), plus BullMQ's own internal queue keys for
-the `process-url`/`index-page` queues. Not a table of record for either service — see "Owned by the
+never one per service). Per-job coordination state shared between the Scraper and the Indexer (two
+pending-work sets, completion guard), plus BullMQ's own internal queue keys for the
+`process-url`/`index-page` queues. Not a table of record for either service — see "Owned by the
 Scraper and the Indexer" above. Full key list in `docs/planning/
 03-crawler-scraper-indexing-plan.md`'s "Redis keys" table:
 
 | Key | Type | Purpose |
 |---|---|---|
-| `crawl:{job_id}:visited` | Set | authoritative per-job dedup gate (Scraper only) |
-| `job:{job_id}:pending_scrape` | Int | completion tracking — Scraper writes, Indexer reads (the Scraper never reads it back) |
-| `job:{job_id}:pending_index` | Int | completion tracking — Indexer writes and reads |
+| `job:{job_id}:pending_scrape` | Set | URLs currently claimed for scraping but not yet finalized — Scraper writes (add on claim, remove on finalize), Indexer reads its cardinality only (the Scraper never reads it back) |
+| `job:{job_id}:pending_index` | Set | URLs currently claimed for indexing but not yet finalized — Indexer writes and reads |
 | `job:{job_id}:succeeded` | Set | URLs the Scraper successfully scraped — scrape-stage only; a page can be in this set yet have permanently failed to index (a deliberate POC-level simplification, not a bug — see `services.md`'s Indexer section) |
 | `job:{job_id}:failed` | Set | URLs that terminally failed to scrape |
 | `job:{job_id}:notified` | flag | completion fires exactly once — `SET NX`'d by the Indexer only (the Scraper never checks for completion at all, see `03-crawler-scraper-indexing-plan.md` §6 for why) |
 
+There is no separate `crawl:{job_id}:visited` dedup marker — the per-job dedup gate for both
+`process-url` and `index-page` claims is the BullMQ job itself (a `jobId` fixed per `job_id`+URL,
+so a duplicate `add()` is a safe no-op), checked via `queue.getJob()` before claiming. A Redis
+marker written *before* the claim it gates is durable can be left stranded by a crash between "set
+the marker" and "actually claim the work," permanently hanging the job — see
+`03-crawler-scraper-indexing-plan.md` §4's note on this. `pending_scrape`/`pending_index` are Sets,
+not counters, specifically so adding/removing a URL is idempotent under Kafka redelivery.
+
 Each side keeps its **own independent copy** of the Redis client code (`RedisCoordinationStore` in
 both `apps/scraper/src/infrastructure/redis/` and `apps/indexer/src/infrastructure/redis/`) rather
-than a shared lib — each only needs part of this surface (the Indexer never touches the dedup gate
-or the succeeded/failed sets), so the two copies are scoped differently, not just duplicated
-verbatim. The literal key-name strings above must stay byte-identical between them — both are
-covered by a contract test on each side.
+than a shared lib — each only needs part of this surface (the Indexer never touches the
+succeeded/failed sets, and its own dedup gate lives in BullMQ, not Redis), so the two copies are
+scoped differently, not just duplicated verbatim. The literal key-name strings above must stay
+byte-identical between them — both are covered by a contract test on each side.
 
 No `job:{job_id}:meta` hash — `user_id`/`query`/`base_url` (the job's seed URL, from which
 `base_domain` is derived on demand) all ride on the Kafka message itself instead, propagate-only

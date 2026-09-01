@@ -6,16 +6,14 @@ services:
     build:
       context: ../../backend
       dockerfile: apps/auth/Dockerfile
+    # backend/.env (localhost defaults) is inherited from common.yml's `_defaults` service via
+    # `extends:` above — see its comment. ../docker.env layers the container-network overrides
+    # this service shares with others (DATABASE_URL, OTEL_EXPORTER_OTLP_ENDPOINT, ...) on top; only
+    # OTEL_SERVICE_NAME is unique enough to this one service to need its own `environment:` entry.
     env_file:
-      - ../../backend/.env
+      - ../docker.env
     environment:
-      # Overrides the .env file's localhost-based default — container-to-container calls use
-      # the service name, not localhost.
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=auth
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     ports:
       - "8001:8001"
     depends_on:

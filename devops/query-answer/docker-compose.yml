@@ -6,16 +6,17 @@ services:
     build:
       context: ../../backend
       dockerfile: apps/query-answer/Dockerfile
+    # backend/.env (localhost defaults) is inherited from common.yml's `_defaults` service via
+    # `extends:` above — see its comment. ../docker.env layers the container-network overrides
+    # this service shares with others (VECTOR_DB_URL, EMBEDDING_BASE_URL, KAFKA_BROKERS,
+    # OTEL_EXPORTER_OTLP_ENDPOINT, ...) on top. LLM_BASE_URL isn't shared with any other service
+    # (only Query/Answer has an LLM_BASE_URL var at all) and OTEL_SERVICE_NAME must stay unique, so
+    # both stay here.
     env_file:
-      - ../../backend/.env
+      - ../docker.env
     environment:
-      # Container-network overrides of the .env file's localhost-based defaults.
-      - VECTOR_DB_URL=http://qdrant:6333
-      - EMBEDDING_BASE_URL=http://host.docker.internal:1234/v1 # LM Studio, not containerized
       - LLM_BASE_URL=http://host.docker.internal:1234/v1 # same local LM Studio instance; swappable to a hosted OpenAI-compatible provider via env only
-      - KAFKA_BROKERS=kafka:19092
       - OTEL_SERVICE_NAME=query-answer
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # No ports: — Kafka-only microservice, no HTTP surface.
     extra_hosts:
       - "host.docker.internal:host-gateway" # for Linux Docker hosts; no-op on Docker Desktop

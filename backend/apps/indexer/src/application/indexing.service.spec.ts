@@ -22,8 +22,8 @@ function makeDeps() {
   };
   const eventPublisher: jest.Mocked<IEventPublisher> = { publish: jest.fn() };
   const coordinationStore: jest.Mocked<ICoordinationStore> = {
-    incrementPendingIndex: jest.fn(),
-    decrementPendingIndex: jest.fn(),
+    addPendingIndex: jest.fn(),
+    removePendingIndex: jest.fn(),
     getCompletionUrls: jest.fn(),
     tryClaimCompletion: jest.fn(),
     expireJobKeys: jest.fn(),
@@ -135,7 +135,7 @@ describe('IndexingService.handle', () => {
 describe('IndexingService.finalizeIndex', () => {
   it('does nothing further when either pending counter is still above zero', async () => {
     const deps = makeDeps();
-    deps.coordinationStore.decrementPendingIndex.mockResolvedValue({
+    deps.coordinationStore.removePendingIndex.mockResolvedValue({
       pendingIndex: 0,
       pendingScrape: 1,
     });
@@ -149,7 +149,7 @@ describe('IndexingService.finalizeIndex', () => {
 
   it('does not publish when it loses the completion race', async () => {
     const deps = makeDeps();
-    deps.coordinationStore.decrementPendingIndex.mockResolvedValue({
+    deps.coordinationStore.removePendingIndex.mockResolvedValue({
       pendingIndex: 0,
       pendingScrape: 0,
     });
@@ -164,7 +164,7 @@ describe('IndexingService.finalizeIndex', () => {
 
   it('publishes crawl-complete with url=base_url (not the page url) and expires job keys on winning the race', async () => {
     const deps = makeDeps();
-    deps.coordinationStore.decrementPendingIndex.mockResolvedValue({
+    deps.coordinationStore.removePendingIndex.mockResolvedValue({
       pendingIndex: 0,
       pendingScrape: 0,
     });

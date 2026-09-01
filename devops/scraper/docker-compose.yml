@@ -6,18 +6,15 @@ services:
     build:
       context: ../../backend
       dockerfile: apps/scraper/Dockerfile
+    # backend/.env (localhost defaults) is inherited from common.yml's `_defaults` service via
+    # `extends:` above — see its comment. ../docker.env layers the container-network overrides
+    # this service shares with others (REDIS_URL, SEAWEEDFS_ENDPOINT, KAFKA_BROKERS,
+    # OTEL_EXPORTER_OTLP_ENDPOINT, ...) on top; only OTEL_SERVICE_NAME is unique enough to this one
+    # service to need its own `environment:` entry.
     env_file:
-      - ../../backend/.env
+      - ../docker.env
     environment:
-      # Overrides the .env file's localhost-based defaults — container-to-container calls use
-      # service names, not localhost.
-      - REDIS_URL=redis://redis:6379
-      - SEAWEEDFS_ENDPOINT=http://seaweedfs:8333
-      - KAFKA_BROKERS=kafka:19092
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=scraper
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # No ports: — Kafka-only microservice, no HTTP surface. Same reasoning as job-manager.
     depends_on:
       kafka:

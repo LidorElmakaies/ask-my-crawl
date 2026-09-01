@@ -6,6 +6,17 @@
 #
 # `networks:` is deliberately NOT here — gateway/auth need `[askmycrawl, observability]`, everything
 # else needs just `[askmycrawl]`, so that stays per-service rather than forcing a false uniform value.
+#
+# `env_file` IS here — every real service needs backend/.env's local-dev defaults, so it's loaded
+# once for all of them via `extends:` instead of a repeated line in each devops/<unit>/docker-
+# compose.yml. Verified empirically that `extends:` actually merges a base service's `env_file`
+# list into the extending service's (not just `environment:`/`volumes:`), and that relative paths
+# here resolve against common.yml's own location (devops/), not the extending file's — hence
+# `../backend/.env`, not the `../../backend/.env` each per-service file used before this existed.
+# Each per-service file layers its own `env_file: - ../docker.env` (container-network overrides,
+# shared by 2+ services) on top — later env_file entries win, so docker.env correctly overrides
+# this file's localhost-based defaults; an `environment:` block still wins over both when a service
+# needs a value nothing else shares (e.g. OTEL_SERVICE_NAME, which must differ per service).
 services:
   _defaults:
     restart: unless-stopped
@@ -14,3 +25,5 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    env_file:
+      - ../backend/.env

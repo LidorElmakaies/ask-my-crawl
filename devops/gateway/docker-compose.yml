@@ -6,21 +6,21 @@ services:
     build:
       context: ../../backend
       dockerfile: apps/gateway/Dockerfile
+    # backend/.env (localhost defaults) is inherited from common.yml's `_defaults` service via
+    # `extends:` above — see its comment. ../docker.env layers the container-network overrides
+    # this service shares with others (KAFKA_BROKERS, OTEL_EXPORTER_OTLP_ENDPOINT, ...) on top.
+    # AUTH_SERVICE_URL/JOB_MANAGER_URL/GRAFANA_URL/KAFKA_UI_URL/OTEL_SERVICE_NAME are Gateway-only
+    # (no code fallback for any of them, see docs/planning/01-architecture-notes.md), so they stay
+    # here rather than in the shared file.
     env_file:
-      - ../../backend/.env
+      - ../docker.env
     environment:
-      # No code fallback for any of these (see docs/planning/01-architecture-notes.md) — every
-      # dependency address this app needs is set explicitly here.
       - AUTH_SERVICE_URL=http://auth:8001 # Gateway proxies /auth/*, /me, /admin/users* to it
-      - KAFKA_BROKERS=kafka:19092 # job-created/result-saved consumer (src/realtime/)
       - JOB_MANAGER_URL=http://job-manager:8002 # jobs-proxy's GET /jobs* forward target
       # tool-proxy's admin-gated reverse-proxy targets (docs/planning/02-admin-dashboard-plan.md)
       - GRAFANA_URL=http://grafana:3000
       - KAFKA_UI_URL=http://kafka-ui:8080
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=gateway
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     ports:
       - "8000:8000"
     networks:

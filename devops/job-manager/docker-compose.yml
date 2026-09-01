@@ -6,17 +6,15 @@ services:
     build:
       context: ../../backend
       dockerfile: apps/job-manager/Dockerfile
+    # backend/.env (localhost defaults) is inherited from common.yml's `_defaults` service via
+    # `extends:` above — see its comment. ../docker.env layers the container-network overrides
+    # this service shares with others (DATABASE_URL, KAFKA_BROKERS, OTEL_EXPORTER_OTLP_ENDPOINT,
+    # ...) on top; only OTEL_SERVICE_NAME is unique enough to this one service to need its own
+    # `environment:` entry.
     env_file:
-      - ../../backend/.env
+      - ../docker.env
     environment:
-      # Overrides the .env file's localhost-based default — container-to-container calls use
-      # the service name, not localhost.
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl
-      - KAFKA_BROKERS=kafka:19092
-      # OpenTelemetry — service.name must be unique per service; the collector lives on the
-      # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=job-manager
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # No ports: — Kafka-only microservice, no HTTP surface. Nothing calls it directly; Gateway's
     # read path for GET /jobs* isn't implemented yet (see docs/specs/services.md), and even once it
     # is, cross-service traffic stays on the shared `askmycrawl` network, not a published host port.

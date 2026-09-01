@@ -8,9 +8,9 @@ import { RedisCoordinationStore } from './redis-coordination.store';
 // a typo'd key name on either side would silently break the fan-in completion race rather than
 // throwing anywhere.
 const mockRedis = {
-  incr: jest.fn(),
-  decr: jest.fn(),
-  get: jest.fn(),
+  sadd: jest.fn(),
+  srem: jest.fn(),
+  scard: jest.fn(),
   set: jest.fn(),
   smembers: jest.fn(),
   expire: jest.fn(),
@@ -22,8 +22,9 @@ jest.mock('ioredis', () => ({
   default: jest.fn().mockImplementation(() => mockRedis),
 }));
 
+// Must be truthy — the constructor throws otherwise, before the ioredis mock is ever reached.
 function fakeConfig(): ConfigService {
-  return { get: () => undefined } as unknown as ConfigService;
+  return { get: () => 'redis://localhost:6379' } as unknown as ConfigService;
 }
 
 describe('RedisCoordinationStore (Indexer) — key-name contract', () => {
@@ -35,20 +36,28 @@ describe('RedisCoordinationStore (Indexer) — key-name contract', () => {
     store = new RedisCoordinationStore(fakeConfig());
   });
 
-  it('incrementPendingIndex: INCR job:{job_id}:pending_index', async () => {
-    await store.incrementPendingIndex(jobId);
-    expect(mockRedis.incr).toHaveBeenCalledWith('job:job-1:pending_index');
+  it('addPendingIndex: SADD job:{job_id}:pending_index', async () => {
+    await store.addPendingIndex(jobId, 'https://example.com/page');
+    expect(mockRedis.sadd).toHaveBeenCalledWith(
+      'job:job-1:pending_index',
+      'https://example.com/page',
+    );
   });
 
-  it('decrementPendingIndex: DECR job:{job_id}:pending_index, GET job:{job_id}:pending_scrape', async () => {
-    mockRedis.decr.mockResolvedValue(0);
-    mockRedis.get.mockResolvedValue(null);
+  it('removePendingIndex: SREM job:{job_id}:pending_index, SCARD both pending sets', async () => {
+    mockRedis.scard.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
 
-    const counts = await store.decrementPendingIndex(jobId);
+    const counts = await store.removePendingIndex(
+      jobId,
+      'https://example.com/page',
+    );
 
-    expect(mockRedis.decr).toHaveBeenCalledWith('job:job-1:pending_index');
-    expect(mockRedis.get).toHaveBeenCalledWith('job:job-1:pending_scrape');
-    // A missing pending_scrape key (nothing incremented it yet) coerces to 0, not NaN/null.
+    expect(mockRedis.srem).toHaveBeenCalledWith(
+      'job:job-1:pending_index',
+      'https://example.com/page',
+    );
+    expect(mockRedis.scard).toHaveBeenCalledWith('job:job-1:pending_index');
+    expect(mockRedis.scard).toHaveBeenCalledWith('job:job-1:pending_scrape');
     expect(counts).toEqual({ pendingIndex: 0, pendingScrape: 0 });
   });
 
@@ -72,14 +81,13 @@ describe('RedisCoordinationStore (Indexer) — key-name contract', () => {
     expect(won).toBe(true);
   });
 
-  it("expireJobKeys: EXPIREs visited/pending_scrape/pending_index/succeeded/failed (not notified — already TTL'd by its own SET)", async () => {
+  it("expireJobKeys: EXPIREs pending_scrape/pending_index/succeeded/failed (not notified — already TTL'd by its own SET)", async () => {
     await store.expireJobKeys(jobId, 3600);
     const expiredKeys = mockRedis.expire.mock.calls.map(
       (call: unknown[]) => call[0] as string,
     );
     expect(expiredKeys.sort()).toEqual(
       [
-        'crawl:job-1:visited',
         'job:job-1:pending_scrape',
         'job:job-1:pending_index',
         'job:job-1:succeeded',

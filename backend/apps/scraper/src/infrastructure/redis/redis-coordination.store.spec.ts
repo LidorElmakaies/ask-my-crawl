@@ -10,8 +10,7 @@ import { RedisCoordinationStore } from './redis-coordination.store';
 // completion or publishes crawl-complete).
 const mockRedis = {
   sadd: jest.fn(),
-  incr: jest.fn(),
-  decr: jest.fn(),
+  srem: jest.fn(),
   disconnect: jest.fn(),
 };
 
@@ -20,8 +19,9 @@ jest.mock('ioredis', () => ({
   default: jest.fn().mockImplementation(() => mockRedis),
 }));
 
+// Must be truthy — the constructor throws otherwise, before the ioredis mock is ever reached.
 function fakeConfig(): ConfigService {
-  return { get: () => undefined } as unknown as ConfigService;
+  return { get: () => 'redis://localhost:6379' } as unknown as ConfigService;
 }
 
 describe('RedisCoordinationStore (Scraper) — key-name contract', () => {
@@ -33,23 +33,20 @@ describe('RedisCoordinationStore (Scraper) — key-name contract', () => {
     store = new RedisCoordinationStore(fakeConfig());
   });
 
-  it('tryMarkVisited: SADD crawl:{job_id}:visited', async () => {
-    mockRedis.sadd.mockResolvedValue(1);
-    await store.tryMarkVisited(jobId, 'https://example.com/page');
+  it('addPendingScrape: SADD job:{job_id}:pending_scrape', async () => {
+    await store.addPendingScrape(jobId, 'https://example.com/page');
     expect(mockRedis.sadd).toHaveBeenCalledWith(
-      'crawl:job-1:visited',
+      'job:job-1:pending_scrape',
       'https://example.com/page',
     );
   });
 
-  it('incrementPendingScrape: INCR job:{job_id}:pending_scrape', async () => {
-    await store.incrementPendingScrape(jobId);
-    expect(mockRedis.incr).toHaveBeenCalledWith('job:job-1:pending_scrape');
-  });
-
-  it('decrementPendingScrape: DECR job:{job_id}:pending_scrape', async () => {
-    await store.decrementPendingScrape(jobId);
-    expect(mockRedis.decr).toHaveBeenCalledWith('job:job-1:pending_scrape');
+  it('removePendingScrape: SREM job:{job_id}:pending_scrape', async () => {
+    await store.removePendingScrape(jobId, 'https://example.com/page');
+    expect(mockRedis.srem).toHaveBeenCalledWith(
+      'job:job-1:pending_scrape',
+      'https://example.com/page',
+    );
   });
 
   it('markSucceeded/markFailed: SADD job:{job_id}:succeeded / job:{job_id}:failed', async () => {

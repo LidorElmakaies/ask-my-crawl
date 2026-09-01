@@ -94,7 +94,10 @@ export class IndexingService implements IIndexingUseCase {
       `Indexing ${outcome} for job_id=${jobId} url=${data.normalizedUrl}`,
     );
 
-    const counts = await this.coordinationStore.decrementPendingIndex(jobId);
+    const counts = await this.coordinationStore.removePendingIndex(
+      jobId,
+      data.normalizedUrl,
+    );
     if (counts.pendingScrape > 0 || counts.pendingIndex > 0) {
       return; // job isn't done yet
     }

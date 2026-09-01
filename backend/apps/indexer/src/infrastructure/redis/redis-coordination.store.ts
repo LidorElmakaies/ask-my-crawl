@@ -13,7 +13,6 @@ const PENDING_INDEX_KEY = (jobId: string) => `job:${jobId}:pending_index`;
 const SUCCEEDED_KEY = (jobId: string) => `job:${jobId}:succeeded`;
 const FAILED_KEY = (jobId: string) => `job:${jobId}:failed`;
 const NOTIFIED_KEY = (jobId: string) => `job:${jobId}:notified`;
-const VISITED_KEY = (jobId: string) => `crawl:${jobId}:visited`;
 
 // Own independent copy of the Scraper's RedisCoordinationStore — not shared code, see
 // docs/specs/data-model.md's Redis section for why. Key-name strings below must stay
@@ -36,20 +35,18 @@ export class RedisCoordinationStore
     this.redis.disconnect();
   }
 
-  async incrementPendingIndex(jobId: string): Promise<void> {
-    await this.redis.incr(PENDING_INDEX_KEY(jobId));
+  async addPendingIndex(jobId: string, url: string): Promise<void> {
+    await this.redis.sadd(PENDING_INDEX_KEY(jobId), url);
   }
 
-  async decrementPendingIndex(jobId: string): Promise<PendingCounts> {
-    const [pendingIndex, pendingScrapeRaw] = await Promise.all([
-      this.redis.decr(PENDING_INDEX_KEY(jobId)),
-      this.redis.get(PENDING_SCRAPE_KEY(jobId)),
+  async removePendingIndex(jobId: string, url: string): Promise<PendingCounts> {
+    await this.redis.srem(PENDING_INDEX_KEY(jobId), url);
+    // Sequential: SCARD must read after SREM applies.
+    const [pendingIndex, pendingScrape] = await Promise.all([
+      this.redis.scard(PENDING_INDEX_KEY(jobId)),
+      this.redis.scard(PENDING_SCRAPE_KEY(jobId)),
     ]);
-    // GET on a missing pending_scrape key returns null, not "0" — coerce explicitly.
-    return {
-      pendingIndex,
-      pendingScrape: Number(pendingScrapeRaw ?? 0),
-    };
+    return { pendingIndex, pendingScrape };
   }
 
   async getCompletionUrls(jobId: string): Promise<CompletionUrls> {
@@ -75,7 +72,6 @@ export class RedisCoordinationStore
     // NOTIFIED_KEY already has its own TTL from tryClaimCompletion's SET ... EX.
     await Promise.all(
       [
-        VISITED_KEY(jobId),
         PENDING_SCRAPE_KEY(jobId),
         PENDING_INDEX_KEY(jobId),
         SUCCEEDED_KEY(jobId),

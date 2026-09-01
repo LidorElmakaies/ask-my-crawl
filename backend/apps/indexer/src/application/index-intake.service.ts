@@ -5,8 +5,7 @@ import type { ICoordinationStore } from '../infrastructure/interfaces/coordinati
 import type { IIndexPageQueue } from '../infrastructure/interfaces/index-page-queue.interface';
 import type { IIndexIntakeUseCase } from './interfaces/index-intake-use-case.interface';
 
-// Bridges page-scraped onto the index-page BullMQ queue. No dedup gate — a page-scraped message
-// is never a rediscovery the way crawl-frontier's are. See
+// Bridges page-scraped onto the index-page BullMQ queue. See
 // docs/planning/03-crawler-scraper-indexing-plan.md §7.
 @Injectable()
 export class IndexIntakeService implements IIndexIntakeUseCase {
@@ -17,7 +16,16 @@ export class IndexIntakeService implements IIndexIntakeUseCase {
   ) {}
 
   async handle(message: PageScrapedMessage): Promise<void> {
-    await this.coordinationStore.incrementPendingIndex(message.job_id);
+    const alreadyClaimed = await this.queue.alreadyClaimed(
+      message.job_id,
+      message.normalizedUrl,
+    );
+    if (alreadyClaimed) return;
+
+    await this.coordinationStore.addPendingIndex(
+      message.job_id,
+      message.normalizedUrl,
+    );
     await this.queue.enqueue(message);
   }
 }

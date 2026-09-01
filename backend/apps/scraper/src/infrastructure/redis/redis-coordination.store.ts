@@ -3,7 +3,6 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import type { ICoordinationStore } from '../interfaces/coordination-store.interface';
 
-const VISITED_KEY = (jobId: string) => `crawl:${jobId}:visited`;
 const PENDING_SCRAPE_KEY = (jobId: string) => `job:${jobId}:pending_scrape`;
 const SUCCEEDED_KEY = (jobId: string) => `job:${jobId}:succeeded`;
 const FAILED_KEY = (jobId: string) => `job:${jobId}:failed`;
@@ -31,17 +30,12 @@ export class RedisCoordinationStore
     this.redis.disconnect();
   }
 
-  async tryMarkVisited(jobId: string, url: string): Promise<boolean> {
-    const added = await this.redis.sadd(VISITED_KEY(jobId), url);
-    return added === 1;
+  async addPendingScrape(jobId: string, url: string): Promise<void> {
+    await this.redis.sadd(PENDING_SCRAPE_KEY(jobId), url);
   }
 
-  async incrementPendingScrape(jobId: string): Promise<void> {
-    await this.redis.incr(PENDING_SCRAPE_KEY(jobId));
-  }
-
-  async decrementPendingScrape(jobId: string): Promise<void> {
-    await this.redis.decr(PENDING_SCRAPE_KEY(jobId));
+  async removePendingScrape(jobId: string, url: string): Promise<void> {
+    await this.redis.srem(PENDING_SCRAPE_KEY(jobId), url);
   }
 
   async markSucceeded(jobId: string, url: string): Promise<void> {

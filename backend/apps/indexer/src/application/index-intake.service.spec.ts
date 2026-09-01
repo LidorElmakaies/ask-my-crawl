@@ -7,13 +7,14 @@ import { IndexIntakeService } from './index-intake.service';
 
 function makeDeps() {
   const coordinationStore: jest.Mocked<ICoordinationStore> = {
-    incrementPendingIndex: jest.fn(),
-    decrementPendingIndex: jest.fn(),
+    addPendingIndex: jest.fn(),
+    removePendingIndex: jest.fn(),
     getCompletionUrls: jest.fn(),
     tryClaimCompletion: jest.fn(),
     expireJobKeys: jest.fn(),
   };
   const queue: jest.Mocked<IIndexPageQueue> = {
+    alreadyClaimed: jest.fn(),
     enqueue: jest.fn(),
   };
   return { coordinationStore, queue };
@@ -32,15 +33,32 @@ describe('IndexIntakeService', () => {
     base_url: 'https://example.com/',
   };
 
-  it('increments pending_index and enqueues onto index-page — no dedup gate', async () => {
+  it('adds to pending_index and enqueues onto index-page when not already claimed', async () => {
     const { coordinationStore, queue } = makeDeps();
+    queue.alreadyClaimed.mockResolvedValue(false);
     const service = new IndexIntakeService(coordinationStore, queue);
 
     await service.handle(message);
 
-    expect(coordinationStore.incrementPendingIndex).toHaveBeenCalledWith(
+    expect(queue.alreadyClaimed).toHaveBeenCalledWith(
       'job-1',
+      'https://example.com/page',
+    );
+    expect(coordinationStore.addPendingIndex).toHaveBeenCalledWith(
+      'job-1',
+      'https://example.com/page',
     );
     expect(queue.enqueue).toHaveBeenCalledWith(message);
+  });
+
+  it('does nothing when an index-page job already exists for this job_id+normalizedUrl', async () => {
+    const { coordinationStore, queue } = makeDeps();
+    queue.alreadyClaimed.mockResolvedValue(true);
+    const service = new IndexIntakeService(coordinationStore, queue);
+
+    await service.handle(message);
+
+    expect(coordinationStore.addPendingIndex).not.toHaveBeenCalled();
+    expect(queue.enqueue).not.toHaveBeenCalled();
   });
 });

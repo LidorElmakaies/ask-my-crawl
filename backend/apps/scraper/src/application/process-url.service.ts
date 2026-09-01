@@ -86,7 +86,7 @@ export class ProcessUrlService implements IProcessUrlUseCase {
 
     // Only the Indexer's finalizeIndex() checks for job completion and publishes crawl-complete —
     // see docs/planning/03-crawler-scraper-indexing-plan.md §6.
-    await this.coordinationStore.decrementPendingScrape(jobId);
+    await this.coordinationStore.removePendingScrape(jobId, url);
   }
 
   private async handleHtmlPage(
