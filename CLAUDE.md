@@ -19,13 +19,14 @@ working this repo with agentic teams: `.claude/agents/{backend,frontend,devops,t
 ## Repo layout
 
 ```
-backend/                 NestJS monorepo — apps/ (gateway, auth, job-manager, scraper, indexer; two
-                          more services planned, see docs/specs/services.md) + libs/ (auth-kernel,
-                          dtos, kafka-contracts, kafka-client, otel — shared code between apps)
+backend/                 NestJS monorepo — apps/ (gateway, auth, job-manager, scraper, indexer,
+                          query-answer; one more service planned, see docs/specs/services.md) +
+                          libs/ (auth-kernel, dtos, kafka-contracts, kafka-client, otel — shared
+                          code between apps)
 frontend/                 Expo / React Native app — see frontend/CLAUDE.md for details
 devops/                   docker-compose.yml (app stack) + observability/ (Grafana/Loki/
                           Prometheus/Tempo/OTel — joined to the app stack via a shared Docker
-                          network; gateway/auth/job-manager/scraper/indexer send real
+                          network; gateway/auth/job-manager/scraper/indexer/query-answer send real
                           traces/logs/metrics here, see backend/libs/otel)
 docs/specs/               Formal specs — source of truth for how the system is supposed to work
 docs/planning/            Raw decision log — why things are the way they are
@@ -68,7 +69,12 @@ docs/planning/            Raw decision log — why things are the way they are
   wasted retries) + a real `crawl-complete` summary; a separate test against an unreachable host
   confirmed the transient-failure path genuinely retries `SCRAPER_FETCH_MAX_ATTEMPTS` times before
   giving up. Only HTML content is handled — a non-HTML response hits a deliberately unimplemented
-  stub (`handleUnsupportedContentType`), not silently ignored.
+  stub (`handleUnsupportedContentType`), not silently ignored. `ProcessUrlService.finalizeUrl()`
+  logs a per-URL outcome line (`Scraping succeeded/failed for job_id=... url=...`) — added after
+  scaling to 2 Scraper instances against a real `books.toscrape.com` crawl (586 pages) showed the
+  Indexer's equivalent per-page log split cleanly across its 2 instances in Loki
+  (`service_instance_id` label) while the Scraper had no such visibility; re-running the same crawl
+  confirmed the new line splits 290/296 across both instances, summing to the true total.
 - **Indexer** (`backend/apps/indexer`) — Kafka-only microservice (no HTTP surface, no Postgres
   table of its own), the other half of `docs/planning/03-crawler-scraper-indexing-plan.md`. Two
   internal pieces: **Index Intake Consumer** (`@EventPattern('page-scraped')`, bridges each message
@@ -89,10 +95,25 @@ docs/planning/            Raw decision log — why things are the way they are
   bug found and fixed along the way (commented at its exact call site, see
   `docs/specs/services.md`'s Indexer section): LM Studio's default embedding request encoding
   (`base64`) silently truncates the vector, fixed by forcing `encodingFormat: 'float'`.
-- **Not implemented**: Query/Answer Service, Notification Service. `backend/libs/kafka-contracts`
-  (topic names + typed Kafka payloads matching `docs/specs/event-schemas.md`) is imported by every
-  producer/consumer above; every topic in `event-schemas.md` now has at least a producer or a
-  consumer except the ones still awaiting Query-Answer/Notification.
+- **Query/Answer Service** (`backend/apps/query-answer`) — Kafka-only microservice (no HTTP surface,
+  no Postgres table of its own), the RAG step. Two internal pieces, mirroring the Scraper's/
+  Indexer's shape: **Answer Intake Consumer** (`@EventPattern('crawl-complete')`, bridges each
+  message onto BullMQ's `answer-job` queue — no coordination-store involvement at all, unlike
+  `page-scraped`→`index-page`, since `crawl-complete`→`answer-ready` is a strict 1:1 mapping with no
+  per-job fan-in to track) and **Answering Worker(s)** (BullMQ workers — embed the job's `query` via
+  its own scoped copy of the Indexer's LM Studio embedding client, search **Qdrant directly** for the
+  top-k chunks filtered by `job_id` (own scoped read client, not a new Indexer API — see
+  `docs/specs/data-model.md`'s Redis-precedent reasoning), build a system+user RAG prompt, call an
+  LLM via a config-driven OpenAI-compatible client (`LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`,
+  defaulting to the same local LM Studio instance, swappable to a hosted provider with no code
+  change — same pattern as `EMBEDDING_BASE_URL`), and publish `answer-ready`). A partial-failure
+  crawl (`crawl-complete`'s `succeeded_count`/`failed_count`/`failed_urls`) is deliberately ignored —
+  the answer comes purely from whatever chunks exist in Qdrant for the job. BullMQ here is
+  retry/backoff only, not dedup/completion tracking.
+- **Not implemented**: Notification Service. `backend/libs/kafka-contracts` (topic names + typed
+  Kafka payloads matching `docs/specs/event-schemas.md`) is imported by every producer/consumer
+  above; every topic in `event-schemas.md` now has both a producer and a consumer except
+  `answer-ready`'s Notification Service side.
 
 ## Commands
 
@@ -117,10 +138,10 @@ npx expo start --web
 **Easiest way to run the whole backend + web frontend together**: Docker Compose. **Observability
 must come up first** — `devops/docker-compose.yml` references `devops/observability`'s Docker
 network as `external: true`, so the whole `devops/` compose project (`gateway`/`auth`/`job-manager`/
-`scraper`/`indexer`/everything) fails to start without it already existing:
+`scraper`/`indexer`/`query-answer`/everything) fails to start without it already existing:
 ```bash
 cd devops/observability && docker compose --env-file ../.env up -d   # Grafana (via Gateway's /admin/grafana, no direct port), Loki, Prometheus, Tempo, OTel Collector
-cd .. && docker compose up -d --build                                # postgres, redis, seaweedfs, qdrant, gateway (:8000), auth (:8001), job-manager, scraper, indexer, frontend (:8081), kafka (:9092)
+cd .. && docker compose up -d --build                                # postgres, redis, seaweedfs, qdrant, gateway (:8000), auth (:8001), job-manager, scraper, indexer, query-answer, frontend (:8081), kafka (:9092)
 ```
 `devops/.env` (copy from `devops/.env.example`) holds `PUBLIC_ORIGIN` — the single source of truth
 for the deployment's public origin, read by Grafana's `GF_SERVER_ROOT_URL` and the frontend build.
@@ -131,13 +152,17 @@ command picks it up automatically since Compose reads `.env` from the directory 
 that creates all seven topics `event-schemas.md` defines (`job-requests`/`crawl-frontier`/
 `job-created`/`answer-ready`/`result-saved` for Job Manager Service, `crawl-complete`/`page-scraped`
 for the Scraper/Indexer — matching its partition/retention table exactly), then exits — see the
-`devops` agent for image/version and listener layout. `redis` (one shared instance, backs both the
-Scraper's and the Indexer's BullMQ queues + per-job coordination state) and `seaweedfs`
-(S3-compatible raw-HTML store, `seaweedfs-init` creates the `askmycrawl-raw-html` bucket explicitly)
-exist too. `qdrant` (self-hosted vector DB, a single container — see the `devops` agent) needs a
-**locally-running LM Studio instance** reachable at
-`host.docker.internal:1234` for the Indexer's embedding calls to succeed — LM Studio itself isn't
-containerized, nothing in `docker compose up` starts it. `devops/` has no Makefile (removed
+`devops` agent for image/version and listener layout. `redis` (one shared instance, backs the
+Scraper's, the Indexer's, and Query/Answer Service's BullMQ queues + the Scraper/Indexer's per-job
+coordination state — Query/Answer needs no coordination state of its own, see `docs/specs/
+services.md`) and `seaweedfs` (S3-compatible raw-HTML store, `seaweedfs-init` creates the
+`askmycrawl-raw-html` bucket explicitly, read only by the Scraper/Indexer — Query/Answer never
+touches it) exist too. `qdrant` (self-hosted vector DB, a single container — see the `devops` agent)
+is written to only by the Indexer and read directly by Query/Answer Service (no API in between, see
+`docs/specs/data-model.md`); both need a **locally-running LM Studio instance** reachable at
+`host.docker.internal:1234` for their embedding calls to succeed (Query/Answer additionally needs a
+chat-capable model loaded there for its LLM calls, configurable via `LLM_BASE_URL`/`LLM_MODEL`) — LM
+Studio itself isn't containerized, nothing in `docker compose up` starts it. `devops/` has no Makefile (removed
 deliberately — `make` isn't installed on this dev machine, see the `devops` agent) — the
 two-command sequence above, in that order, is the only way to bring it up. Android/iOS still run
 via `npx expo start` locally, not containerized.

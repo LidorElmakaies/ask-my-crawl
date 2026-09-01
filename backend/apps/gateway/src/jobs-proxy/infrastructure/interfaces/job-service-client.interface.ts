@@ -8,4 +8,10 @@ import type {
  */
 export interface IJobServiceClient {
   forward(options: ForwardQueryOptions): Promise<ProxyResponse>;
+  retryJob(
+    jobId: string,
+    userId: string,
+    role: string,
+    authorizationHeader?: string,
+  ): Promise<ProxyResponse>;
 }

@@ -74,4 +74,20 @@ export class JobsProxyController {
 
     writeJobsProxyResponse(res, response);
   }
+
+  @Post(':id/retry')
+  async retryJob(
+    @Param('id') id: string,
+    @Req() req: Request & { user: AuthenticatedUser },
+    @Res() res: Response,
+  ): Promise<void> {
+    const response = await this.jobsProxyService.retryJob(
+      id,
+      req.user.userId,
+      req.user.role,
+      req.headers.authorization,
+    );
+
+    writeJobsProxyResponse(res, response);
+  }
 }

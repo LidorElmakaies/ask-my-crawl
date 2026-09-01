@@ -21,9 +21,9 @@ the **Scraper** and **Indexer** sections below; this file only summarizes it.
                                   └──────────────────────┘                └────────┬────────┘
                                                                                     │ crawl-complete
                                                                                     ▼
-                                  ┌──────────────┐──▶ Indexer (similarity search, TBD)
+                                  ┌──────────────┐──▶ Qdrant (direct similarity search)
                                   │ Query/Answer │
-                                  │   Service    │──▶ LLM (external API)
+                                  │   Service    │──▶ LLM (OpenAI-compatible, local LM Studio by default)
                                   └──────┬───────┘
                                          │ answer-ready
                             ┌────────────┴────────────┐
@@ -43,11 +43,10 @@ planning doc's diagram. `crawl-complete` is produced only by the Indexer, once i
 Scraper's own decrement never checks for completion (see the planning doc's "Completion detection"
 section for why).
 
-**Status**: Gateway, Auth Service, Job Manager Service, the Scraper, and the Indexer are
-implemented — a job can be submitted, crawled, and fully indexed into Qdrant end to end. Query/Answer
-Service (the RAG step: retrieve from the Indexer, call an LLM, publish `answer-ready`) and
-Notification Service are not built yet — that's what's left before a submitted job actually produces
-an answer back to the user.
+**Status**: Gateway, Auth Service, Job Manager Service, the Scraper, the Indexer, and Query/Answer
+Service are implemented — a job can be submitted, crawled, indexed into Qdrant, and answered end to
+end. Only Notification Service is left unbuilt — a job's `result` gets written and pushed over
+WebSocket, but nothing emails/texts/Telegrams the user about it yet.
 
 ## Gateway
 
@@ -135,16 +134,48 @@ shape:
 
 ## Query/Answer Service
 
-**Not implemented.** It should, on `crawl-complete`: call the Indexer for the top-k relevant chunks
-for that job's query (Qdrant similarity search — request/response shape not designed, see the
-Indexer section above); pass them plus the query to an LLM; publish `answer-ready`. `crawl-complete`
-carries `succeeded_urls`/`failed_urls`/counts — whether/how a partial-failure crawl (some URLs
-failed) should change the answer step isn't decided; flag before assuming "ignore failures, answer
-from whatever indexed."
+**Implemented** (`backend/apps/query-answer`). One Nest app, one consumer, no BullMQ/Redis — unlike
+the Scraper/Indexer, there's no per-job fan-in to coordinate here:
 
+- **Crawl Complete Consumer** — consumes `crawl-complete` and calls `AnsweringService.handle()`
+  directly (a trivial passthrough, same shape as the Indexer's Index Intake Consumer minus the
+  BullMQ bridge — `crawl-complete`→`answer-ready` is a strict 1:1 mapping, so there's no queue to
+  bridge onto).
+- **AnsweringService** — embeds the job's `query` (own scoped copy of the Indexer's
+  `OpenAiEmbeddingClient` — same `EMBEDDING_BASE_URL`/`EMBEDDING_MODEL`/`EMBEDDING_DIMENSION` config,
+  since query and document vectors must share one embedding space for cosine similarity to mean
+  anything), searches **Qdrant directly** for the top-k chunks filtered by `job_id` (own scoped
+  Qdrant read client — see "Retrieval" below), builds a system+user RAG prompt from whatever chunks
+  come back (including the zero-chunks case — the LLM is still called and told plainly that no
+  crawled content was found, rather than a hand-rolled canned answer), calls the LLM, and publishes
+  `answer-ready` with `answer_text` set. On a transient failure (embedding/Qdrant/LLM calls), retries
+  by republishing `crawl-complete` with `retry_count` incremented and a short backoff
+  (`2s * 2^retry_count`, capped at 30s) — a Kafka-native retry loop, not BullMQ's attempts/backoff.
+  Once `retry_count` exceeds `ANSWER_MAX_RETRIES` (default 5), or immediately on a
+  `PermanentAnswerError` (e.g. an embedding dimension mismatch — retrying can never help), it gives
+  up and publishes `answer-ready` with `failed_reason` set instead. See `event-schemas.md`'s
+  `crawl-complete`/`answer-ready` sections for the exact wire shapes.
 - **Owns**: nothing in Postgres.
-- **Talks to**: the Indexer (internal call, not yet designed), an external LLM API (provider TBD),
-  Kafka (`crawl-complete` in, `answer-ready` out).
+- **Talks to**: Qdrant (read-only similarity search, direct — see below), an LLM (OpenAI-compatible
+  HTTP API — see below), Kafka (`crawl-complete` in and out — see above, `answer-ready` out).
+
+**Retrieval — resolved**: Query/Answer reads Qdrant **directly**, via its own scoped embedding +
+Qdrant-read client, rather than through a new Indexer HTTP endpoint. This follows the project's
+existing precedent for shared infra — Redis is already accessed via independent scoped client
+copies per service (see `data-model.md`'s Redis section) rather than through one owning service's
+API — and keeps the Indexer's "Kafka-only, no HTTP surface" trait intact; the Indexer still owns
+*writing* to Qdrant (delete-by-`url` + upsert), but reading it is no longer exclusive to it.
+
+**LLM provider — resolved**: one config-driven OpenAI-compatible client (`LLM_BASE_URL` + optional
+`LLM_API_KEY` + `LLM_MODEL`), the same swappability pattern `EMBEDDING_BASE_URL` already gives the
+Indexer's embedding provider. Defaults to the same local LM Studio instance (a chat-capable model
+loaded alongside the embedding model); pointing it at a real hosted OpenAI-compatible provider
+(OpenAI, OpenRouter, Groq, ...) instead is a config change, not a code change.
+
+**Partial failures — resolved**: ignored entirely. `crawl-complete`'s `succeeded_count`/
+`failed_count`/`failed_urls` go unused by this service — failed URLs were never indexed in the first
+place, so they can't affect retrieval either way; the answer is generated purely from whatever
+chunks actually exist in Qdrant for the `job_id`.
 
 ## Notification Service
 
@@ -162,15 +193,19 @@ into a real job: it creates the `crawl-frontier` seed the Scraper's BFS depends 
 of the `jobs` table, and exposes internal `GET /jobs` and `GET /jobs/:id` endpoints for Gateway's read proxy.
 
 - **Owns**: `jobs` — one table: `id` (generated), `user_id`, `url`, `query`, `result` (`NULL` until
-  answered).
+  answered), `failed_reason` (`NULL` unless Query/Answer gave up).
 - **Responsibilities**: consumes `job-requests` (`{user_id, url, query}`); generates a `job_id` and
-  inserts the `jobs` row with those 3 fields plus the new `id` and a `NULL` `result`; publishes the seed
-  `crawl-frontier` message (`{job_id, user_id, url, depth: MAX_CRAWL_DEPTH, query}`); publishes `job-created` so Gateway
-  can relay the new `job_id` to the submitting user over WebSocket. On `answer-ready`, updates `jobs.result`
-  and publishes `result-saved`. On `GET /jobs`, returns user-scoped or admin-filtered jobs.
+  inserts the `jobs` row with those 3 fields plus the new `id` and `NULL` `result`/`failed_reason`;
+  publishes the seed `crawl-frontier` message (`{job_id, user_id, url, depth: MAX_CRAWL_DEPTH,
+  query}`); publishes `job-created` so Gateway can relay the new `job_id` to the submitting user over
+  WebSocket. On `answer-ready`, writes `jobs.result` (clearing `failed_reason`) or `jobs.failed_reason`
+  depending on which the message carries, then publishes `result-saved` with the matching shape. On
+  `GET /jobs`, returns user-scoped or admin-filtered jobs. On `POST /jobs/:id/retry`, verifies
+  ownership, rejects if the job has no `failed_reason` to retry, clears it, and republishes
+  `crawl-complete` with `retry_count: 0` — no re-crawl, the Indexer's chunks are still in Qdrant.
 - **Talks to**: Kafka (`job-requests` in, `crawl-frontier` seed + `job-created` out, `answer-ready`
-  in, `result-saved` out), Postgres (`jobs`), Gateway (internal HTTP call, inbound — read path only,
-  `GET /jobs*`).
+  in, `result-saved` out, `crawl-complete` out for manual retries), Postgres (`jobs`), Gateway
+  (internal HTTP call, inbound — read path plus `POST /jobs/:id/retry`).
 
 
 ## Internal (service-to-service) calls

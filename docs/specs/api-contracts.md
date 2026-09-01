@@ -44,12 +44,14 @@ None of these require an access token (they're how you get one).
 | POST | `/jobs` | `{ url, query }` | `202` → `{ status: "accepted" }` — **no `job_id`**. Gateway does not call Job Manager Service synchronously here — it publishes a `job-requests` Kafka message and returns immediately, before any job row exists to hand back an id for. The frontend learns the real `job_id` asynchronously via a `job.created` WebSocket push (see the WebSocket section below) once Job Manager Service has actually created the row. (This response's `status: "accepted"` is just an ack literal — unrelated to the `jobs` row, which has no `status` column at all, see below.) |
 | GET | `/jobs` | — | User: own jobs only. Admin: all jobs, with optional `?user_id=` filter. Unaffected by the above — still a synchronous internal call to Job Manager Service, this is a read, not the write path being decoupled. |
 | GET | `/jobs/:id` | — | User: 403 if not their own job. Admin: any job. `result` is `null` until the answer is ready — that's the only "is it done" signal now, see below. Same as above — still synchronous. |
+| POST | `/jobs/:id/retry` | — | User: 403 if not their own job. Admin: any job. `202` on success — clears `failed_reason` and republishes `crawl-complete` with a fresh retry budget, no re-crawl (Qdrant chunks are untouched). `404` if the job doesn't exist, `409` if it has no `failed_reason` to retry. |
 
-`job` shape: `{ id, user_id, url, query, result }` — `result` is the answer text, `null` until
-Query/Answer Service finishes. No `status`/timestamps/`error_message` fields, and `result` is a
-plain string-or-null field directly on `job`, not a nested object. Source attribution isn't
-persisted anywhere — see `data-model.md`'s `jobs` table for the full list of what this table does
-and doesn't track.
+`job` shape: `{ id, user_id, url, query, result, failed_reason }` — `result` is the answer text,
+`null` until Query/Answer Service finishes; `failed_reason` is `null` unless Query/Answer gave up,
+in which case `result` stays `null`. No `status`/timestamps fields, and both are plain
+string-or-null fields directly on `job`, not a nested object. Source attribution isn't persisted
+anywhere — see `data-model.md`'s `jobs` table for the full list of what this table does and doesn't
+track.
 
 ## Admin — user management (requires access token with `role: admin`)
 
@@ -84,12 +86,14 @@ carries, regardless of transport):
 // out about the job via a later GET /jobs listing it — same gap as job.completed below.
 { "type": "job.created", "job_id": "uuid", "user_id": "uuid", "url": "string", "query": "string" }
 
-// on job completion, matches the result-saved Kafka event
-{ "type": "job.completed", "job_id": "uuid", "result": "string" }
+// on job completion, matches the result-saved Kafka event — exactly one of result/failed_reason
+// is set, never both
+{ "type": "job.completed", "job_id": "uuid", "result": "string | null", "failed_reason": "string | null" }
 ```
 
 No `job.status` progress event — the `jobs` table has no `status` column, so there's no in-between
-state to report. A client only ever learns "created" (job.created) and "done" (job.completed).
+state to report. A client only ever learns "created" (job.created) and "done" (job.completed, which
+now distinguishes success from failure via `failed_reason`).
 
 No client → server messages are required for v1 — the socket is push-only. Frontend implementation:
 `frontend/src/services/socketService.js` (the only file allowed to import `socket.io-client`),

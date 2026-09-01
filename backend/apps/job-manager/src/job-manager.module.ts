@@ -6,6 +6,7 @@ import { JobRequestsConsumer } from './api/consumers/job-requests.consumer';
 import { JobsController } from './api/controllers/jobs.controller';
 import { CreateJobService } from './application/create-job.service';
 import { GetJobsService } from './application/get-jobs.service';
+import { RetryJobService } from './application/retry-job.service';
 import { SaveJobResultService } from './application/save-job-result.service';
 import { KafkajsEventPublisher } from '@app/kafka-client';
 import { JobEntity } from './infrastructure/postgres/entities/job.entity';
@@ -15,6 +16,7 @@ import {
   EVENT_PUBLISHER,
   GET_JOBS_USE_CASE,
   JOB_REPOSITORY,
+  RETRY_JOB_USE_CASE,
   SAVE_JOB_RESULT_USE_CASE,
 } from './tokens';
 
@@ -41,6 +43,7 @@ import {
     { provide: CREATE_JOB_USE_CASE, useClass: CreateJobService },
     { provide: SAVE_JOB_RESULT_USE_CASE, useClass: SaveJobResultService },
     { provide: GET_JOBS_USE_CASE, useClass: GetJobsService },
+    { provide: RETRY_JOB_USE_CASE, useClass: RetryJobService },
     { provide: JOB_REPOSITORY, useClass: TypeOrmJobRepository },
     {
       provide: EVENT_PUBLISHER,

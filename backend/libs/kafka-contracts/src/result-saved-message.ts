@@ -1,8 +1,7 @@
-// Wire format for the `result-saved` topic, matching docs/specs/event-schemas.md.
-//
-// No `completed_at` — the `jobs` table carries no timestamps, see data-model.md.
+// Wire format for the `result-saved` topic — see docs/specs/event-schemas.md.
 export interface ResultSavedMessage {
   job_id: string;
   user_id: string;
-  result: string;
+  result: string | null;
+  failed_reason: string | null;
 }

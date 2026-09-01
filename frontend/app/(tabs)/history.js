@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -11,21 +11,45 @@ import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
 import EmptyState from '../../src/components/EmptyState';
 import GlowCard from '../../src/components/GlowCard';
+import GradientButton from '../../src/components/GradientButton';
 import InfoBox from '../../src/components/InfoBox';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import StatusBadge from '../../src/components/StatusBadge';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
-import { fetchJobs } from '../../src/store/slices/jobsSlice';
+import { fetchJobs, retryJob } from '../../src/store/slices/jobsSlice';
+
+function getJobStatus(job) {
+  if (job.result !== null && job.result !== undefined) return 'completed';
+  if (job.failed_reason !== null && job.failed_reason !== undefined) {
+    return 'failed';
+  }
+  return 'pending';
+}
 
 export default function HistoryScreen() {
   const dispatch = useDispatch();
-  const { items: jobs, status, error } = useSelector((state) => state.jobs);
+  const {
+    items: jobs,
+    status,
+    error,
+    retryStatus,
+  } = useSelector((state) => state.jobs);
   const { colors } = useAppTheme();
+  const [retryingJobId, setRetryingJobId] = useState(null);
+
+  const handleRetry = (jobId) => {
+    setRetryingJobId(jobId);
+    dispatch(retryJob(jobId));
+  };
 
   useEffect(() => {
     dispatch(fetchJobs());
   }, [dispatch]);
+
+  useEffect(() => {
+    if (retryStatus !== 'loading') setRetryingJobId(null);
+  }, [retryStatus]);
 
   const onRefresh = () => {
     dispatch(fetchJobs());
@@ -88,7 +112,7 @@ export default function HistoryScreen() {
 
         {/* Jobs List */}
         {jobs.map((job) => {
-          const isCompleted = job.result !== null && job.result !== undefined;
+          const jobStatus = getJobStatus(job);
 
           return (
             <GlowCard key={job.id} style={styles.jobCard}>
@@ -109,7 +133,7 @@ export default function HistoryScreen() {
                   </Text>
                 </View>
 
-                <StatusBadge completed={isCompleted} />
+                <StatusBadge status={jobStatus} />
               </View>
 
               {/* Question / Query */}
@@ -120,8 +144,8 @@ export default function HistoryScreen() {
                 textStyle={styles.queryText}
               />
 
-              {/* Result Answer or In-Progress Indicator */}
-              {isCompleted ? (
+              {/* Result Answer, In-Progress Indicator, or Failure + Retry */}
+              {jobStatus === 'completed' && (
                 <InfoBox
                   variant="success"
                   icon="checkmark-circle-outline"
@@ -131,7 +155,9 @@ export default function HistoryScreen() {
                   text={job.result}
                   textStyle={styles.resultText}
                 />
-              ) : (
+              )}
+
+              {jobStatus === 'pending' && (
                 <InfoBox variant="pending" icon="sync-outline" row>
                   <Text
                     style={[styles.pendingText, { color: colors.textMuted }]}
@@ -139,6 +165,29 @@ export default function HistoryScreen() {
                     Crawling pages and synthesizing answer... Updates live.
                   </Text>
                 </InfoBox>
+              )}
+
+              {jobStatus === 'failed' && (
+                <>
+                  <InfoBox
+                    variant="error"
+                    icon="alert-circle-outline"
+                    label="FAILED"
+                    labelStyle={styles.resultLabel}
+                    style={styles.resultBox}
+                    text={job.failed_reason}
+                    textStyle={styles.resultText}
+                  />
+                  <GradientButton
+                    label="Retry"
+                    loading={
+                      retryingJobId === job.id && retryStatus === 'loading'
+                    }
+                    disabled={retryStatus === 'loading'}
+                    onPress={() => handleRetry(job.id)}
+                    style={styles.retryButton}
+                  />
+                </>
               )}
 
               {/* Job ID Footer */}
@@ -175,6 +224,9 @@ const styles = StyleSheet.create({
   jobCard: {
     gap: 12,
     padding: 18,
+  },
+  retryButton: {
+    alignSelf: 'flex-start',
   },
   cardHeader: {
     flexDirection: 'row',

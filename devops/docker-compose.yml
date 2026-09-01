@@ -11,19 +11,21 @@
 # can't cross the per-service files below.
 #
 # `postgres`, `gateway`, `auth`, `job-manager`, `frontend`, `kafka` (broker + topic init + UI),
-# `redis`, `seaweedfs`, `scraper`, `indexer`, and `qdrant` exist today — see docs/specs/services.md
-# for the remaining two backend services (Query/Answer, Notification). Add each one here (its own
+# `redis`, `seaweedfs`, `scraper`, `indexer`, `qdrant`, and `query-answer` exist today — see
+# docs/specs/services.md for the one remaining backend service (Notification). Add each one here (its own
 # Dockerfile under backend/apps/<service>/, its own devops/<service>/docker-compose.yml, its own
 # `include:` line below) as it gets built — see the `devops` agent (.claude/agents/devops.md) for
 # the full target shape, including its "reuse existing shared infrastructure" rule (a new service
 # points at an existing Redis/SeaweedFS/Postgres/Kafka instance, it doesn't get its own). Job
 # Manager Service (2026-08-28) is Kafka's first real producer/consumer; the Scraper (2026-08-28,
 # docs/planning/03-crawler-scraper-indexing-plan.md) is Redis/SeaweedFS's first; the Indexer
-# (backend/apps/indexer) is Qdrant's first (and only, so far) service definition — Qdrant itself is
-# the one genuinely new piece of shared infrastructure here, not reused from an existing instance,
-# since nothing else in this stack needed a vector DB before now (originally built against Milvus, a
+# (backend/apps/indexer) is Qdrant's first service definition — Qdrant itself was the one genuinely
+# new piece of shared infrastructure at the time, not reused from an existing instance, since
+# nothing else in this stack needed a vector DB before now (originally built against Milvus, a
 # heavier 3-container topology, then migrated to Qdrant's single-container one — see
-# docs/planning/03-crawler-scraper-indexing-plan.md §7).
+# docs/planning/03-crawler-scraper-indexing-plan.md §7). Query/Answer Service now reuses that same
+# Qdrant instance read-only, per this file's "reuse existing shared infrastructure" rule above — it
+# doesn't get its own.
 
 include:
   - path: postgres/docker-compose.yml
@@ -37,6 +39,7 @@ include:
   - path: scraper/docker-compose.yml
   - path: qdrant/docker-compose.yml
   - path: indexer/docker-compose.yml
+  - path: query-answer/docker-compose.yml
 
 networks:
   askmycrawl:            # internal service-to-service (Postgres, and the services themselves)

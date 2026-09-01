@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/unbound-method --
+   false positive: these are jest.fn() mocks, not real prototype methods relying on `this`. */
 import type { IJobRequestsPublisher } from '../infrastructure/interfaces/job-requests-publisher.interface';
 import type { IJobServiceClient } from '../infrastructure/interfaces/job-service-client.interface';
 import { JobsProxyService } from './jobs-proxy.service';
@@ -11,6 +13,9 @@ describe('JobsProxyService', () => {
     publisher = { publish: jest.fn().mockResolvedValue(undefined) };
     client = {
       forward: jest.fn().mockResolvedValue({ statusCode: 200, data: [] }),
+      retryJob: jest
+        .fn()
+        .mockResolvedValue({ statusCode: 202, data: undefined }),
     };
     service = new JobsProxyService(publisher, client);
   });
@@ -42,5 +47,22 @@ describe('JobsProxyService', () => {
       role: 'user',
     });
     expect(response).toEqual({ statusCode: 200, data: [] });
+  });
+
+  it('forwards retry requests to job service client on retryJob', async () => {
+    const response = await service.retryJob(
+      'job-1',
+      'user-1',
+      'user',
+      'Bearer token',
+    );
+
+    expect(client.retryJob).toHaveBeenCalledWith(
+      'job-1',
+      'user-1',
+      'user',
+      'Bearer token',
+    );
+    expect(response).toEqual({ statusCode: 202, data: undefined });
   });
 });

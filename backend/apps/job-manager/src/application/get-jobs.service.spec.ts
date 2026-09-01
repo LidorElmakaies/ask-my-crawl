@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/unbound-method --
+   false positive: these are jest.fn() mocks, not real prototype methods relying on `this`. */
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { Job } from '../models/job';
@@ -13,12 +15,15 @@ describe('GetJobsService', () => {
     url: 'https://example.com',
     query: 'query',
     result: 'answer',
+    failed_reason: null,
   };
 
   beforeEach(() => {
     repo = {
       create: jest.fn(),
       saveResult: jest.fn(),
+      saveFailure: jest.fn(),
+      clearFailureForRetry: jest.fn(),
       findByUserId: jest.fn().mockResolvedValue([sampleJob]),
       findAll: jest.fn().mockResolvedValue([sampleJob]),
       findById: jest.fn().mockResolvedValue(sampleJob),

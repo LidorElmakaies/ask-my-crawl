@@ -34,6 +34,21 @@ export const submitJobRequest = createAsyncThunk(
   },
 );
 
+export const retryJob = createAsyncThunk(
+  'jobs/retryJob',
+  async (jobId, { getState, rejectWithValue }) => {
+    try {
+      const { accessToken } = getState().auth;
+      if (!accessToken) {
+        return rejectWithValue('No access token — cannot retry job.');
+      }
+      return await jobsService.retryJob(accessToken, jobId);
+    } catch (err) {
+      return rejectWithValue(err.message);
+    }
+  },
+);
+
 const jobsSlice = createSlice({
   name: 'jobs',
   initialState: {
@@ -42,6 +57,8 @@ const jobsSlice = createSlice({
     error: null,
     submitStatus: 'idle', // idle | loading | succeeded | failed
     submitError: null,
+    retryStatus: 'idle', // idle | loading | succeeded | failed
+    retryError: null,
   },
   reducers: {
     jobCreated(state, action) {
@@ -56,6 +73,7 @@ const jobsSlice = createSlice({
           url: payload.url,
           query: payload.query,
           result: null,
+          failed_reason: null,
         });
       }
     },
@@ -66,11 +84,13 @@ const jobsSlice = createSlice({
       const job = state.items.find((j) => j.id === payload.job_id);
       if (job) {
         job.result = payload.result;
+        job.failed_reason = payload.failed_reason;
       }
     },
     clearJobsError(state) {
       state.error = null;
       state.submitError = null;
+      state.retryError = null;
     },
   },
   extraReducers: (builder) => {
@@ -97,6 +117,17 @@ const jobsSlice = createSlice({
       .addCase(submitJobRequest.rejected, (state, action) => {
         state.submitStatus = 'failed';
         state.submitError = action.payload || action.error.message;
+      })
+      .addCase(retryJob.pending, (state) => {
+        state.retryStatus = 'loading';
+        state.retryError = null;
+      })
+      .addCase(retryJob.fulfilled, (state) => {
+        state.retryStatus = 'succeeded';
+      })
+      .addCase(retryJob.rejected, (state, action) => {
+        state.retryStatus = 'failed';
+        state.retryError = action.payload || action.error.message;
       });
   },
 });

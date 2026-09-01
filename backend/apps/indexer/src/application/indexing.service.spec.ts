@@ -189,6 +189,7 @@ describe('IndexingService.finalizeIndex', () => {
         failed_count: 0,
         succeeded_urls: ['https://example.com/page'],
         failed_urls: [],
+        retry_count: 0,
       },
     );
     expect(deps.coordinationStore.expireJobKeys).toHaveBeenCalledWith(

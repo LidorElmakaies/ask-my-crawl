@@ -19,6 +19,7 @@ function toDomain(entity: JobEntity): Job {
     url: entity.url,
     query: entity.query,
     result: entity.result,
+    failed_reason: entity.failed_reason,
   };
 }
 
@@ -29,12 +30,43 @@ export class TypeOrmJobRepository implements IJobRepository {
   ) {}
 
   async create(input: CreateJobInput): Promise<Job> {
-    const entity = this.repo.create({ ...input, result: null });
+    const entity = this.repo.create({
+      ...input,
+      result: null,
+      failed_reason: null,
+    });
     return toDomain(await this.repo.save(entity));
   }
 
   async saveResult(jobId: string, result: string): Promise<Job | null> {
-    const updateResult = await this.repo.update({ id: jobId }, { result });
+    const updateResult = await this.repo.update(
+      { id: jobId },
+      { result, failed_reason: null },
+    );
+    if (!updateResult.affected) {
+      return null;
+    }
+    const entity = await this.repo.findOneBy({ id: jobId });
+    return entity ? toDomain(entity) : null;
+  }
+
+  async saveFailure(jobId: string, failedReason: string): Promise<Job | null> {
+    const updateResult = await this.repo.update(
+      { id: jobId },
+      { failed_reason: failedReason },
+    );
+    if (!updateResult.affected) {
+      return null;
+    }
+    const entity = await this.repo.findOneBy({ id: jobId });
+    return entity ? toDomain(entity) : null;
+  }
+
+  async clearFailureForRetry(jobId: string): Promise<Job | null> {
+    const updateResult = await this.repo.update(
+      { id: jobId },
+      { failed_reason: null },
+    );
     if (!updateResult.affected) {
       return null;
     }

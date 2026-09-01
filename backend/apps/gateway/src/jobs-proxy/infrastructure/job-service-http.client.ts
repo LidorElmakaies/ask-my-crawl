@@ -58,4 +58,44 @@ export class JobServiceHttpClient implements IJobServiceClient {
       };
     }
   }
+
+  async retryJob(
+    jobId: string,
+    userId: string,
+    role: string,
+    authorizationHeader?: string,
+  ): Promise<ProxyResponse> {
+    try {
+      const response = await firstValueFrom(
+        this.http.request({
+          method: 'POST',
+          url: `${this.baseUrl}/jobs/${jobId}/retry`,
+          headers: {
+            ...(authorizationHeader
+              ? { Authorization: authorizationHeader }
+              : {}),
+            'x-user-id': userId,
+            'x-user-role': role,
+          },
+          validateStatus: () => true,
+        }),
+      );
+
+      return {
+        statusCode: response.status,
+        data: response.data as unknown,
+      };
+    } catch (err) {
+      const axiosErr = err as AxiosError;
+      return {
+        statusCode: 502,
+        data: {
+          error: {
+            code: 'job_manager_service_unreachable',
+            message: axiosErr.message,
+          },
+        },
+      };
+    }
+  }
 }

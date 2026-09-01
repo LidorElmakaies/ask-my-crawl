@@ -6,6 +6,7 @@ import {
 } from '@app/kafka-contracts';
 import { EVENT_PUBLISHER, JOB_REPOSITORY } from '../tokens';
 import type { IEventPublisher } from '@app/kafka-client';
+import type { Job } from '../models/job';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { ISaveJobResultUseCase } from './interfaces/save-job-result-use-case.interface';
 
@@ -19,10 +20,12 @@ export class SaveJobResultService implements ISaveJobResultUseCase {
   ) {}
 
   async handle(input: AnswerReadyMessage): Promise<void> {
-    const job = await this.jobRepository.saveResult(
-      input.job_id,
-      input.answer_text,
-    );
+    const job = input.answer_text
+      ? await this.jobRepository.saveResult(input.job_id, input.answer_text)
+      : await this.jobRepository.saveFailure(
+          input.job_id,
+          input.failed_reason as string,
+        );
 
     if (!job) {
       // No dedicated DLQ topic exists in this design (same discipline as the Scraper/Indexer's
@@ -34,11 +37,15 @@ export class SaveJobResultService implements ISaveJobResultUseCase {
       return;
     }
 
+    await this.publishResultSaved(job);
+  }
+
+  private async publishResultSaved(job: Job): Promise<void> {
     const resultSavedMessage: ResultSavedMessage = {
       job_id: job.id,
       user_id: job.user_id,
-      // job.result is guaranteed non-null here — saveResult just wrote it.
-      result: job.result as string,
+      result: job.result,
+      failed_reason: job.failed_reason,
     };
     await this.eventPublisher.publish(
       KAFKA_TOPICS.RESULT_SAVED,

@@ -114,6 +114,7 @@ export class IndexingService implements IIndexingUseCase {
       failed_count: urls.failedUrls.length,
       succeeded_urls: urls.succeededUrls,
       failed_urls: urls.failedUrls,
+      retry_count: 0,
     };
     await this.eventPublisher.publish(
       KAFKA_TOPICS.CRAWL_COMPLETE,

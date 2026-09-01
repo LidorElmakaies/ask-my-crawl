@@ -35,7 +35,7 @@ describe('TypeOrmJobRepository (integration)', () => {
     await repo.clear();
   });
 
-  it('create() generates a uuid id and stores exactly the 3 fields plus result: null', async () => {
+  it('create() generates a uuid id and stores exactly the 3 fields plus result/failed_reason: null', async () => {
     const input = {
       user_id: randomUUID(),
       url: 'https://example.com/page',
@@ -49,13 +49,18 @@ describe('TypeOrmJobRepository (integration)', () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
       ),
     );
-    expect(job).toEqual({ id: job.id, result: null, ...input });
+    expect(job).toEqual({
+      id: job.id,
+      result: null,
+      failed_reason: null,
+      ...input,
+    });
 
     const row = await repo.findOneBy({ id: job.id });
-    expect(row).toMatchObject({ ...input, result: null });
+    expect(row).toMatchObject({ ...input, result: null, failed_reason: null });
   });
 
-  it('saveResult() updates result and returns the updated row', async () => {
+  it('saveResult() updates result, clears failed_reason, and returns the updated row', async () => {
     const created = await jobRepository.create({
       user_id: randomUUID(),
       url: 'https://example.com/other-page',
@@ -64,9 +69,43 @@ describe('TypeOrmJobRepository (integration)', () => {
 
     const updated = await jobRepository.saveResult(created.id, 'the answer');
 
-    expect(updated).toEqual({ ...created, result: 'the answer' });
+    expect(updated).toEqual({
+      ...created,
+      result: 'the answer',
+      failed_reason: null,
+    });
     const row = await repo.findOneBy({ id: created.id });
     expect(row?.result).toBe('the answer');
+  });
+
+  it('saveFailure() sets failed_reason and leaves result untouched', async () => {
+    const created = await jobRepository.create({
+      user_id: randomUUID(),
+      url: 'https://example.com/failure-page',
+      query: 'a question',
+    });
+
+    const updated = await jobRepository.saveFailure(created.id, 'boom');
+
+    expect(updated).toEqual({ ...created, failed_reason: 'boom' });
+    const row = await repo.findOneBy({ id: created.id });
+    expect(row?.failed_reason).toBe('boom');
+    expect(row?.result).toBeNull();
+  });
+
+  it('clearFailureForRetry() clears failed_reason', async () => {
+    const created = await jobRepository.create({
+      user_id: randomUUID(),
+      url: 'https://example.com/retry-page',
+      query: 'a question',
+    });
+    await jobRepository.saveFailure(created.id, 'boom');
+
+    const updated = await jobRepository.clearFailureForRetry(created.id);
+
+    expect(updated?.failed_reason).toBeNull();
+    const row = await repo.findOneBy({ id: created.id });
+    expect(row?.failed_reason).toBeNull();
   });
 
   it('saveResult() on an unknown id returns null', async () => {

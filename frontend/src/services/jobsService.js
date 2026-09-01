@@ -29,3 +29,20 @@ export async function createJob(token, { url, query }) {
   });
   return response.json();
 }
+
+/**
+ * Retries a failed job — re-queues it for a fresh answer attempt.
+ * @param {string} token - Bearer access token
+ * @param {string} jobId - Job id to retry
+ * @returns {Promise<{ status: string }>}
+ */
+export async function retryJob(token, jobId) {
+  const response = await authorizedFetch(
+    `${URLS.jobs.list}/${jobId}/retry`,
+    token,
+    {
+      method: 'POST',
+    },
+  );
+  return response.json();
+}

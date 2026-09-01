@@ -119,19 +119,28 @@ Consumer, which bridges it into its `index-page` BullMQ queue (Kafka→BullMQ br
 
 ## `crawl-complete`
 
-**Implemented** (producing side only — the Indexer's Indexing Worker). Full mechanism:
-`docs/planning/03-crawler-scraper-indexing-plan.md` §6. Fires once a job's two Redis pending-work
-counters (`pending_scrape`, `pending_index`) both reach zero, as observed after the Indexer's own
-`pending_index` decrement — a `SET NX` guard ensures exactly one publish per job even under
-at-least-once Kafka redelivery. The payload is a full result summary, so Query/Answer Service can
-act without a callback to fetch counts/URL lists separately.
+**Implemented** (both sides — the Indexer's Indexing Worker produces the original message,
+Query/Answer Service's Crawl Complete Consumer consumes it directly, no BullMQ in between). Full
+mechanism: `docs/planning/03-crawler-scraper-indexing-plan.md` §6. Fires once a job's two Redis
+pending-work counters (`pending_scrape`, `pending_index`) both reach zero, as observed after the
+Indexer's own `pending_index` decrement — a `SET NX` guard ensures exactly one publish per job even
+under at-least-once Kafka redelivery. The payload is a full result summary, so Query/Answer Service
+can act without a callback to fetch counts/URL lists separately — though in practice it only reads
+`job_id`/`user_id`/`query`, ignoring `succeeded_count`/`failed_count`/`succeeded_urls`/`failed_urls`
+entirely (a partial-failure crawl doesn't change the answer step — see `services.md`'s Query/Answer
+section).
 
-- **Producers**: the Indexer's Indexing Worker only — the Scraper never checks for completion or
-  publishes this topic (see the planning doc's "Completion detection" section for why: scrape-side
-  completion can't be observed reliably, since `page-scraped`'s delivery to the Indexer is
-  asynchronous relative to the Scraper's own bookkeeping).
-- **Consumers**: Query/Answer Service, consumer group `query-answer` (not implemented — nothing
-  consumes this topic today, but it must still exist since `auto.create.topics.enable=false`)
+This topic now has two producers: the Indexer (always `retry_count: 0`) and Query/Answer Service
+itself, which republishes the same message with `retry_count` incremented on a transient answering
+failure — a self-loop retry with no new topic and no Redis/BullMQ involved. Job Manager Service also
+republishes it (`retry_count: 0`) for a user-initiated `POST /jobs/:id/retry`, reusing the job's
+stored `user_id`/`url`/`query` and zeroed-out count/URL fields (Query/Answer ignores those four
+fields anyway).
+
+- **Producers**: the Indexer's Indexing Worker (original completion), Query/Answer Service
+  (automatic retry), Job Manager Service (manual retry)
+- **Consumers**: Query/Answer Service's Crawl Complete Consumer, consumer group `query-answer`
+  (calls `AnsweringService.handle()` directly — see `services.md`)
 - **Partition key**: `job_id`
 - **Value**:
   ```jsonc
@@ -143,40 +152,44 @@ act without a callback to fetch counts/URL lists separately.
     "succeeded_count": 12,
     "failed_count": 1,
     "succeeded_urls": ["https://example.com/a", "..."],
-    "failed_urls": ["https://example.com/broken-page"]
+    "failed_urls": ["https://example.com/broken-page"],
+    "retry_count": 0
   }
   ```
 
 ## `answer-ready`
 
-**Implemented** (the consuming side — Job Manager Service). **Not implemented** (the producing
-side — Query/Answer Service doesn't exist yet, so nothing publishes this topic in the live stack
-today). It should fire once Query/Answer Service has run retrieval + the LLM call. Two independent
-consumer groups read this topic in parallel — Kafka pub/sub, not point-to-point — since the answer
-goes to both notification and persistence at the same stage.
+**Implemented** (both sides — Query/Answer Service's AnsweringService produces it, once it has run
+retrieval against Qdrant plus the LLM call, or given up on the answer; Job Manager Service consumes
+it). Two independent consumer groups read this topic in parallel — Kafka pub/sub, not
+point-to-point — since the answer goes to both notification and persistence at the same stage.
 
-- **Producers**: Query/Answer Service (not implemented — no producer exists yet)
+- **Producers**: Query/Answer Service's AnsweringService (implemented — see `services.md`)
 - **Consumers**:
   - Notification Service, consumer group `notification-service` (not implemented)
-  - Job Manager Service, consumer group `job-manager` (implemented — writes `jobs.result` and
-    publishes `result-saved`, see `save-job-result.service.ts`)
+  - Job Manager Service, consumer group `job-manager` (implemented — writes `jobs.result` or
+    `jobs.failed_reason` and publishes `result-saved`, see `save-job-result.service.ts`)
 - **Partition key**: `job_id`
 - **Value**:
   ```jsonc
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "answer_text": "string"
+    "answer_text": "string | null",
+    "failed_reason": "string | null"
   }
   ```
-  No `source_urls` field: Query/Answer Service runs retrieval against the Indexer internally to
-  build the LLM prompt, but nothing carries that source list any further than this call — it isn't
-  persisted or forwarded anywhere.
+  Exactly one of `answer_text`/`failed_reason` is set, never both: a successful answer sets
+  `answer_text` and leaves `failed_reason: null`; giving up (a `PermanentAnswerError`, or a
+  transient failure that exhausted `crawl-complete`'s retry loop) sets `failed_reason` and leaves
+  `answer_text: null`. No `source_urls` field: Query/Answer Service runs retrieval against the
+  Indexer internally to build the LLM prompt, but nothing carries that source list any further than
+  this call — it isn't persisted or forwarded anywhere.
 
 ## `result-saved`
 
-**Implemented.** Fires from Job Manager Service once it has written the answer into the
-`jobs.result` column, so the Gateway can push the update to the user's open WebSocket connection.
+**Implemented.** Fires from Job Manager Service once it has written the answer (or failure) into
+the `jobs` table, so the Gateway can push the update to the user's open WebSocket connection.
 
 - **Producers**: Job Manager Service
 - **Consumers**: Gateway, consumer group `gateway`
@@ -186,10 +199,12 @@ goes to both notification and persistence at the same stage.
   {
     "job_id": "uuid",
     "user_id": "uuid",
-    "result": "string"
+    "result": "string | null",
+    "failed_reason": "string | null"
   }
   ```
-  No `completed_at` — the `jobs` table carries no timestamps, see `data-model.md`.
+  Exactly one of `result`/`failed_reason` is set, never both — mirrors `answer-ready`'s invariant. No
+  `completed_at` — the `jobs` table carries no timestamps, see `data-model.md`.
 - Gateway behavior on receipt: look up an active WebSocket connection for `user_id` in its
   connection registry; if connected, push a `job.completed` event with this payload. If the user
   isn't currently connected, no action needed here — they still get email/SMS/Telegram, and will see

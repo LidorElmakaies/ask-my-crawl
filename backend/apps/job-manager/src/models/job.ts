@@ -9,4 +9,6 @@ export interface Job {
   query: string;
   /** NULL until Query/Answer's answer comes back (answer-ready). */
   result: string | null;
+  /** Set when Query/Answer gives up (answer-ready with failed_reason); cleared on retry/success. */
+  failed_reason: string | null;
 }

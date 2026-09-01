@@ -34,4 +34,13 @@ export class JobsProxyService implements IJobsProxyService {
   async forward(options: ForwardQueryOptions): Promise<ProxyResponse> {
     return this.client.forward(options);
   }
+
+  async retryJob(
+    jobId: string,
+    userId: string,
+    role: string,
+    authorizationHeader?: string,
+  ): Promise<ProxyResponse> {
+    return this.client.retryJob(jobId, userId, role, authorizationHeader);
+  }
 }

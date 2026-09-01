@@ -1,40 +1,59 @@
+import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useAppTheme } from '../hooks/useAppTheme';
 
+// status -> themed background/border/accent/label, keyed off useAppTheme() tokens.
+const STATUS_META = {
+  pending: (colors) => ({
+    background: colors.cardGlow,
+    border: colors.cardBorder,
+    accent: colors.primary,
+    label: 'In Progress',
+  }),
+  completed: (colors) => ({
+    background: colors.successBg,
+    border: colors.successBorder,
+    accent: colors.success,
+    label: 'Completed',
+  }),
+  failed: (colors) => ({
+    background: colors.errorBg,
+    border: colors.errorBorder,
+    accent: colors.error,
+    label: 'Failed',
+  }),
+};
+
 /**
- * Shared, reusable job-status pill — a spinner + "In Progress" badge while pending, or a
- * checkmark-style "Completed" badge once done, themed via useAppTheme(). Use this anywhere a
- * job/task completion status needs to be shown instead of hand-rolling the badge per screen.
+ * Shared, reusable job-status pill — a spinner + "In Progress" badge while pending, a
+ * checkmark-style "Completed" badge once done, or an alert "Failed" badge, themed via
+ * useAppTheme(). Use this anywhere a job/task status needs to be shown instead of hand-rolling
+ * the badge per screen.
  */
-export default function StatusBadge({ completed, style }) {
+export default function StatusBadge({ status, style }) {
   const { colors } = useAppTheme();
+  const { background, border, accent, label } = STATUS_META[status](colors);
 
   return (
     <View
       style={[
         styles.badge,
-        {
-          backgroundColor: completed ? colors.successBg : colors.cardGlow,
-          borderColor: completed ? colors.successBorder : colors.cardBorder,
-        },
+        { backgroundColor: background, borderColor: border },
         style,
       ]}
     >
-      {!completed && (
-        <ActivityIndicator
-          size="small"
-          color={colors.primary}
+      {status === 'pending' && (
+        <ActivityIndicator size="small" color={accent} style={styles.spinner} />
+      )}
+      {status === 'failed' && (
+        <Ionicons
+          name="alert-circle"
+          size={14}
+          color={accent}
           style={styles.spinner}
         />
       )}
-      <Text
-        style={[
-          styles.text,
-          { color: completed ? colors.success : colors.primary },
-        ]}
-      >
-        {completed ? 'Completed' : 'In Progress'}
-      </Text>
+      <Text style={[styles.text, { color: accent }]}>{label}</Text>
     </View>
   );
 }

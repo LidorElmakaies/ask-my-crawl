@@ -235,6 +235,7 @@ describe('Job Manager Service (e2e)', () => {
         job_id: jobId,
         user_id: seed.user_id,
         answer_text: 'The answer, per the crawled page, is 42.',
+        failed_reason: null,
       };
       await producer.send({
         topic: KAFKA_TOPICS.ANSWER_READY,
@@ -263,10 +264,11 @@ describe('Job Manager Service (e2e)', () => {
         job_id: jobId,
         user_id: seed.user_id,
         result: answerReady.answer_text,
+        failed_reason: null,
       });
       // Kafka contract conformance: exact key set matches ResultSavedMessage.
       expect(Object.keys(resultSavedMessages[0].value).sort()).toEqual(
-        ['job_id', 'result', 'user_id'].sort(),
+        ['failed_reason', 'job_id', 'result', 'user_id'].sort(),
       );
     });
   });
@@ -280,6 +282,7 @@ describe('Job Manager Service (e2e)', () => {
         job_id: unknownJobId,
         user_id: randomUUID(),
         answer_text: 'orphaned answer',
+        failed_reason: null,
       };
       await producer.send({
         topic: KAFKA_TOPICS.ANSWER_READY,

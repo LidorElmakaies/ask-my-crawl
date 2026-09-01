@@ -99,6 +99,15 @@
       "compilerOptions": {
         "tsConfigPath": "apps/scraper/tsconfig.app.json"
       }
+    },
+    "query-answer": {
+      "type": "application",
+      "root": "apps/query-answer",
+      "entryFile": "main",
+      "sourceRoot": "apps/query-answer/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/query-answer/tsconfig.app.json"
+      }
     }
   }
 }

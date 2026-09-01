@@ -69,6 +69,12 @@ CREATE TABLE jobs (
                                                           -- nowhere else. NULL is the only "not done
                                                           -- yet" signal — there is no separate
                                                           -- status column (see below).
+  failed_reason TEXT                                     -- NULL unless Query/Answer gave up
+                                                          -- (answer-ready with failed_reason set,
+                                                          -- after its crawl-complete retry loop is
+                                                          -- exhausted or a PermanentAnswerError).
+                                                          -- Cleared back to NULL by a real answer or
+                                                          -- by POST /jobs/:id/retry.
 );
 CREATE INDEX ON jobs (user_id);
 ```
@@ -86,11 +92,9 @@ Real gaps in this table, worth stating plainly rather than glossing over:
   Service (producer) and the Scraper (consumer/decrementer) need to agree on it. May become
   configurable (e.g. per-job or per-user-tier) later; nothing reads it as anything but a constant
   today.
-- **No status column.** "Done" is just `result IS NOT NULL`. There is no in-between state
-  (`crawling`/`answering`) represented anywhere in Postgres, and no `failed` state either — a crawl
-  or answer failure isn't captured on this row at all. This is a real gap, not a considered decision
-  to omit failure handling forever: revisit before building Job Manager Service if failed jobs need
-  to surface as anything other than "still says NULL forever."
+- **No status column.** "Done" is `result IS NOT NULL OR failed_reason IS NOT NULL`. There is still
+  no in-between state (`crawling`/`answering`) represented anywhere in Postgres — only the terminal
+  success/failure outcomes are captured, via `result`/`failed_reason`.
 - **No timestamps, no error tracking** on this table.
 - **No source attribution.** The answer text is the only thing this table stores — which URLs it
   drew from isn't persisted anywhere in Postgres. Query/Answer Service produces that list
@@ -128,9 +132,17 @@ Both services share **Redis** coordination state (dedup set, pending-work counte
 guard) — see "Redis" below. That's ephemeral job-coordination plumbing, not owned domain data, the
 same way both already share the `crawl-frontier`/`page-scraped`/`crawl-complete` Kafka topics.
 
-**Not designed**: the read/retrieval API the Indexer needs to expose for Query/Answer Service's
-query-time similarity search — flagged in `services.md`'s Indexer section, don't invent a shape for
-it here.
+**Resolved**: Query/Answer Service does not go through a new Indexer API for its query-time
+similarity search — it reads Qdrant **directly**, via its own scoped embedding + Qdrant-read client
+(`backend/apps/query-answer`). Same precedent as the Redis dual-copy above (each service gets its
+own scoped client onto shared infrastructure rather than one owning service's API), and it keeps the
+Indexer's "Kafka-only, no HTTP surface" trait intact. The Indexer remains the only writer to Qdrant
+(delete-by-`url` + upsert); Query/Answer only ever reads, filtered by `job_id`. Its own copy of the
+collection-name constant (`DEFAULT_VECTOR_DB_COLLECTION`, `askmycrawl_chunks`) and its own copy of
+the embedding client's config (`EMBEDDING_BASE_URL`/`EMBEDDING_MODEL`/`EMBEDDING_DIMENSION`) must
+both stay identical to the Indexer's — same precedent as the Redis key-name strings above, not
+covered by a contract test yet. See `services.md`'s Query/Answer Service section for the full
+mechanism.
 
 ## Owned by Notification Service
 

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   KAFKA_TOPICS,
   type CrawlFrontierMessage,
@@ -38,6 +38,8 @@ function contentTypeFamily(contentType: string | undefined): ContentTypeFamily {
 // docs/planning/03-crawler-scraper-indexing-plan.md §5.
 @Injectable()
 export class ProcessUrlService implements IProcessUrlUseCase {
+  private readonly logger = new Logger(ProcessUrlService.name);
+
   constructor(
     @Inject(PAGE_FETCHER) private readonly pageFetcher: IPageFetcher,
     @Inject(BLOB_REPOSITORY) private readonly blobRepository: IBlobRepository,
@@ -73,6 +75,8 @@ export class ProcessUrlService implements IProcessUrlUseCase {
     outcome: 'succeeded' | 'failed',
   ): Promise<void> {
     const { job_id: jobId, url } = data;
+
+    this.logger.log(`Scraping ${outcome} for job_id=${jobId} url=${url}`);
 
     if (outcome === 'succeeded') {
       await this.coordinationStore.markSucceeded(jobId, url);

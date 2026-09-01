@@ -23,7 +23,7 @@ export class JobUpdatesController {
   ) {}
 
   @EventPattern(KAFKA_TOPICS.JOB_CREATED)
-  async handleJobCreated(@Payload() message: JobCreatedMessage): Promise<void> {
+  handleJobCreated(@Payload() message: JobCreatedMessage): void {
     this.logger.log(
       `Received job-created event for job_id=${message.job_id} user_id=${message.user_id}`,
     );
@@ -44,9 +44,7 @@ export class JobUpdatesController {
   }
 
   @EventPattern(KAFKA_TOPICS.RESULT_SAVED)
-  async handleResultSaved(
-    @Payload() message: ResultSavedMessage,
-  ): Promise<void> {
+  handleResultSaved(@Payload() message: ResultSavedMessage): void {
     this.logger.log(
       `Received result-saved event for job_id=${message.job_id} user_id=${message.user_id}`,
     );
@@ -55,6 +53,7 @@ export class JobUpdatesController {
       type: 'job.completed',
       job_id: message.job_id,
       result: message.result,
+      failed_reason: message.failed_reason,
     });
 
     if (!pushed) {

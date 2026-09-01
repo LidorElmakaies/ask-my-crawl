@@ -48,7 +48,8 @@ src/
     InputField.js     # Reusable labeled text input — use this, don't hand-roll TextInput
     ScreenHeader.js   # Title + subtitle pair — every tab's header
     SpaceBackground.js# Animated dual-layer starfield background
-    StatusBadge.js    # "Completed" / "In Progress" pill, driven by `completed: boolean`
+    StatusBadge.js    # "Completed" / "In Progress" / "Failed" pill, driven by
+                       # `status: 'pending' | 'completed' | 'failed'`
     ThemeProvider.js  # Gluestack UI provider wired to Redux theme
   context/
     ThemeAnimContext.js # Shared Animated.Value (0=light, 1=dark) for 600ms transitions

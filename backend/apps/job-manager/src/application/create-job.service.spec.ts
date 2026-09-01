@@ -15,6 +15,11 @@ function makeDeps() {
   const jobRepository: jest.Mocked<IJobRepository> = {
     create: jest.fn(),
     saveResult: jest.fn(),
+    saveFailure: jest.fn(),
+    clearFailureForRetry: jest.fn(),
+    findByUserId: jest.fn(),
+    findAll: jest.fn(),
+    findById: jest.fn(),
   };
   const eventPublisher: jest.Mocked<IEventPublisher> = {
     publish: jest.fn(),
@@ -29,6 +34,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     url: 'https://example.com/page',
     query: 'what is this page about?',
     result: null,
+    failed_reason: null,
     ...overrides,
   };
 }

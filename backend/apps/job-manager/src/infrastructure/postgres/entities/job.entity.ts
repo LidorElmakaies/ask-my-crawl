@@ -22,4 +22,12 @@ export class JobEntity {
   // no separate status column (see data-model.md).
   @Column({ type: 'text', nullable: true, default: null })
   result: string | null;
+
+  @Column({
+    name: 'failed_reason',
+    type: 'text',
+    nullable: true,
+    default: null,
+  })
+  failed_reason: string | null;
 }

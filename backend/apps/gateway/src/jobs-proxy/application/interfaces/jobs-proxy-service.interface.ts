@@ -30,4 +30,14 @@ export interface IJobsProxyService {
    * Forwards GET /jobs or GET /jobs/:id query to Job Manager Service.
    */
   forward(options: ForwardQueryOptions): Promise<ProxyResponse>;
+
+  /**
+   * Forwards POST /jobs/:id/retry to Job Manager Service.
+   */
+  retryJob(
+    jobId: string,
+    userId: string,
+    role: string,
+    authorizationHeader?: string,
+  ): Promise<ProxyResponse>;
 }

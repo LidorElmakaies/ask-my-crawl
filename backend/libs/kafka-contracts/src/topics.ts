@@ -9,11 +9,9 @@ export const KAFKA_TOPICS = {
   PAGE_SCRAPED: 'page-scraped', // Scraper -> Indexer bridge
 } as const;
 
-// crawl-complete has no consumer group constant — nothing consumes it yet (awaits Query/Answer
-// Service).
 export const KAFKA_CONSUMER_GROUPS = {
   JOB_MANAGER: 'job-manager',
-  QUERY_ANSWER: 'query-answer',
+  QUERY_ANSWER: 'query-answer', // the Query/Answer Service's Answer Intake Consumer (crawl-complete)
   NOTIFICATION_SERVICE: 'notification-service',
   GATEWAY: 'gateway',
   SCRAPER: 'scraper', // the Scraper's Frontier Consumer (crawl-frontier)
