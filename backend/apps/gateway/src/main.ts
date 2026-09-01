@@ -9,6 +9,7 @@ import {
 } from '@app/otel';
 startOtel('gateway');
 
+import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { IoAdapter } from '@nestjs/platform-socket.io';
@@ -26,7 +27,18 @@ async function bootstrap() {
   // Permissive for the Docker Compose dev phase, same rationale as the WS gateway's own cors
   // option — no HTTP routes here yet, but the future /auth/* etc. proxy routes will need this.
   app.enableCors({ origin: true });
+  // Same as Auth Service's main.ts — this is the only ValidationPipe in the process, so it's what
+  // actually enforces every class-validator decorator on every DTO'd @Body() in this app (jobs-proxy's
+  // CreateJobRequestDto included). The auth-proxy routes take `body: unknown` and pass through
+  // verbatim, so they're untouched by this — Nest only validates a @Body() whose declared type is a
+  // decorated class.
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useWebSocketAdapter(new IoAdapter(app));
+
+  const kafkaBrokers = process.env.KAFKA_BROKERS;
+  if (!kafkaBrokers) {
+    throw new Error('KAFKA_BROKERS is not configured');
+  }
 
   // Connect Kafka microservice for consuming job-created and result-saved events
   app.connectMicroservice<MicroserviceOptions>({
@@ -34,7 +46,7 @@ async function bootstrap() {
     options: {
       client: {
         clientId: 'gateway',
-        brokers: (process.env.KAFKA_BROKERS ?? 'kafka:19092').split(','),
+        brokers: kafkaBrokers.split(','),
       },
       consumer: {
         groupId: KAFKA_CONSUMER_GROUPS.GATEWAY,

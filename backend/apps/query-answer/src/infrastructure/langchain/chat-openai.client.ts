@@ -9,8 +9,10 @@ export class ChatOpenAiClient implements ILlmClient {
   private readonly client: ChatOpenAI;
 
   constructor(config: ConfigService) {
-    const baseURL =
-      config.get<string>('LLM_BASE_URL') ?? 'http://localhost:1234/v1';
+    const baseURL = config.get<string>('LLM_BASE_URL');
+    if (!baseURL) {
+      throw new Error('LLM_BASE_URL is not configured');
+    }
     const model = config.get<string>('LLM_MODEL') ?? 'local-model';
     this.client = new ChatOpenAI({
       model,

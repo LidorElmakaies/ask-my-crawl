@@ -14,6 +14,7 @@ services:
       - SEAWEEDFS_ENDPOINT=http://seaweedfs:8333
       - VECTOR_DB_URL=http://qdrant:6333
       - EMBEDDING_BASE_URL=http://host.docker.internal:1234/v1 # LM Studio, not containerized
+      - KAFKA_BROKERS=kafka:19092
       - OTEL_SERVICE_NAME=indexer
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # No ports: — Kafka-only microservice, no HTTP surface.

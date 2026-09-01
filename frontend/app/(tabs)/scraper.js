@@ -19,6 +19,7 @@ import {
   clearJobsError,
   submitJobRequest,
 } from '../../src/store/slices/jobsSlice';
+import { getQueryError, MAX_QUERY_LENGTH } from '../../src/utils/validation';
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
@@ -31,7 +32,8 @@ export default function ScraperScreen() {
   const { submitStatus, submitError } = useSelector((state) => state.jobs);
   const { colors } = useAppTheme();
 
-  const canSubmit = !!input.trim() && !!query.trim();
+  const queryError = getQueryError(query);
+  const canSubmit = !!input.trim() && !!query.trim() && !queryError;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -97,7 +99,24 @@ export default function ScraperScreen() {
           />
 
           {/* Label */}
-          <Text style={[styles.label, { color: colors.textMuted }]}>QUERY</Text>
+          <View style={styles.queryLabelRow}>
+            <Text style={[styles.label, { color: colors.textMuted }]}>
+              QUERY
+            </Text>
+            <Text
+              style={[
+                styles.charCount,
+                {
+                  color:
+                    query.length > MAX_QUERY_LENGTH
+                      ? colors.error
+                      : colors.textMuted,
+                },
+              ]}
+            >
+              {query.length}/{MAX_QUERY_LENGTH}
+            </Text>
+          </View>
 
           {/* Input */}
           <TextInput
@@ -105,9 +124,11 @@ export default function ScraperScreen() {
               styles.queryInput,
               {
                 backgroundColor: colors.inputBg,
-                borderColor: queryFocused
-                  ? colors.inputFocusBorder
-                  : colors.inputBorder,
+                borderColor: queryError
+                  ? colors.error
+                  : queryFocused
+                    ? colors.inputFocusBorder
+                    : colors.inputBorder,
                 color: colors.text,
                 shadowColor: queryFocused ? colors.primary : 'transparent',
                 shadowOpacity: 0.4,
@@ -120,9 +141,15 @@ export default function ScraperScreen() {
             placeholder="What do you want to know about this page?"
             placeholderTextColor={colors.textMuted}
             multiline
+            maxLength={MAX_QUERY_LENGTH}
             onFocus={() => setQueryFocused(true)}
             onBlur={() => setQueryFocused(false)}
           />
+          {queryError ? (
+            <Text style={[styles.queryError, { color: colors.error }]}>
+              {queryError}
+            </Text>
+          ) : null}
 
           {/* Button */}
           <GradientButton
@@ -195,6 +222,22 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.5,
     marginBottom: 10,
+  },
+  queryLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  charCount: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  queryError: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: -10,
+    marginBottom: 16,
   },
   input: {
     borderWidth: 1.5,

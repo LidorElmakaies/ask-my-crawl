@@ -17,8 +17,11 @@ export class JobServiceHttpClient implements IJobServiceClient {
     private readonly http: HttpService,
     config: ConfigService,
   ) {
-    this.baseUrl =
-      config.get<string>('JOB_MANAGER_URL') ?? 'http://job-manager:8002';
+    const jobManagerUrl = config.get<string>('JOB_MANAGER_URL');
+    if (!jobManagerUrl) {
+      throw new Error('JOB_MANAGER_URL is not configured');
+    }
+    this.baseUrl = jobManagerUrl;
   }
 
   async forward(options: ForwardQueryOptions): Promise<ProxyResponse> {

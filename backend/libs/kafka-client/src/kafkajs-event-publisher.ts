@@ -15,10 +15,11 @@ export class KafkajsEventPublisher
   private readonly producer: Producer;
 
   constructor(config: ConfigService, clientId: string) {
-    const brokers =
-      // container-network default; override via env for local `npx nest start`
-      (config.get<string>('KAFKA_BROKERS') ?? 'kafka:19092').split(',');
-    this.kafka = new Kafka({ clientId, brokers });
+    const kafkaBrokers = config.get<string>('KAFKA_BROKERS');
+    if (!kafkaBrokers) {
+      throw new Error('KAFKA_BROKERS is not configured');
+    }
+    this.kafka = new Kafka({ clientId, brokers: kafkaBrokers.split(',') });
     this.producer = this.kafka.producer();
   }
 

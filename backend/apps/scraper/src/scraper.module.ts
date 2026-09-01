@@ -30,9 +30,11 @@ import {
     BullModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => {
+        const redisUrl = config.get<string>('REDIS_URL');
+        if (!redisUrl) {
+          throw new Error('REDIS_URL is not configured');
+        }
         // @nestjs/bullmq's `connection` option is host/port, not a URL string.
-        const redisUrl =
-          config.get<string>('REDIS_URL') ?? 'redis://redis:6379';
         const { hostname, port } = new URL(redisUrl);
         return {
           connection: { host: hostname, port: port ? Number(port) : 6379 },

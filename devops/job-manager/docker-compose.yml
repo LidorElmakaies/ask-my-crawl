@@ -12,6 +12,7 @@ services:
       # Overrides the .env file's localhost-based default — container-to-container calls use
       # the service name, not localhost.
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/askmycrawl
+      - KAFKA_BROKERS=kafka:19092
       # OpenTelemetry — service.name must be unique per service; the collector lives on the
       # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=job-manager

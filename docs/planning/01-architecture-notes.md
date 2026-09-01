@@ -92,3 +92,32 @@ no timestamps, no separate `results` table — Job Manager Service's whole write
 3 fields the client sent plus a generated id and a NULL result" and, later, "fill in `result`." See
 `docs/specs/data-model.md`'s `jobs` table note for the real gap this leaves (a failed job has no
 representation at all, just stays `NULL` forever).
+
+## 7. Why `query` is length- and charset-limited at the Gateway
+
+`POST /jobs`'s `query` ends up, unmodified, inside the RAG prompt Query/Answer Service builds for
+the LLM — it's user-controlled text that reaches a model prompt, the classic prompt-injection
+surface. Two risks specifically motivated the limit (`docs/specs/api-contracts.md`'s Jobs section):
+
+- **Unicode smuggling**: Unicode Tag characters (`U+E0000`–`U+E007F`), zero-width joiners, and
+  bidi-override characters can ride invisibly on ordinary-looking text (an emoji is the classic
+  carrier) — invisible to a human reading the query back, but present in the raw string an LLM
+  reads token-by-token, so hidden instructions can smuggle in. An **allowlist** (English/Hebrew
+  letters, digits, basic punctuation) closes this categorically instead of chasing individual
+  tricks: anything not on the allowlist is rejected, whatever character range it turns out to
+  occupy. Hebrew (`U+0590`–`U+05FF`) was added deliberately, not opened wide to "any script" — it
+  stops short of General Punctuation, so bidi/LRM/RLM control characters (which real RTL text
+  normally leans on) stay excluded; a Hebrew query renders left-to-right-ordered rather than with
+  native bidi reordering, an accepted tradeoff for keeping the smuggling surface closed.
+- **Unbounded input**: no length cap meant no bound on prompt size/cost per job.
+
+Enforced once, in `CreateJobRequestDto` (`backend/apps/gateway/src/jobs-proxy/api/dto/
+create-job-request.dto.ts`) via class-validator's `@MaxLength`/`@Matches` — this only works because
+the Gateway also had to gain a global `ValidationPipe` (`main.ts`), which class-validator decorators
+need to actually run; before that, `CreateJobRequestDto`'s decorators were dead code, since Auth
+Service is the only other service with HTTP surface and it isn't reachable from outside the
+Gateway either. That's also why this is the *only* enforcement point needed — per the project's
+hard rule that no backend service is reachable except through the Gateway (root `CLAUDE.md`), there
+is no second front door to also validate. The frontend (`frontend/src/utils/validation.js`) mirrors
+the same two rules for immediate as-you-type feedback, but is UX only, not the boundary — a direct
+`POST /jobs` call still goes through this DTO.

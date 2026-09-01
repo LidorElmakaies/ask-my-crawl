@@ -17,7 +17,10 @@ export class QdrantVectorRetriever implements IVectorRetriever {
   private readonly topK: number;
 
   constructor(config: ConfigService) {
-    const url = config.get<string>('VECTOR_DB_URL') ?? 'http://qdrant:6333';
+    const url = config.get<string>('VECTOR_DB_URL');
+    if (!url) {
+      throw new Error('VECTOR_DB_URL is not configured');
+    }
     this.collectionName =
       config.get<string>('VECTOR_DB_COLLECTION') ??
       DEFAULT_VECTOR_DB_COLLECTION;

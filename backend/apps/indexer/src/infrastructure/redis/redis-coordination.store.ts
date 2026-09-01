@@ -25,7 +25,10 @@ export class RedisCoordinationStore
   private readonly redis: Redis;
 
   constructor(config: ConfigService) {
-    const redisUrl = config.get<string>('REDIS_URL') ?? 'redis://redis:6379';
+    const redisUrl = config.get<string>('REDIS_URL');
+    if (!redisUrl) {
+      throw new Error('REDIS_URL is not configured');
+    }
     this.redis = new Redis(redisUrl);
   }
 

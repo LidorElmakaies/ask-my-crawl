@@ -19,9 +19,11 @@ export class AuthServiceHttpClient implements IAuthServiceClient {
     private readonly http: HttpService,
     config: ConfigService,
   ) {
-    // Container-network default (service name, not localhost — see devops.md's non-negotiables).
-    // Override via env for local (non-Docker) `npx nest start gateway`.
-    this.baseUrl = config.get<string>('AUTH_SERVICE_URL') ?? 'http://auth:8001';
+    const authServiceUrl = config.get<string>('AUTH_SERVICE_URL');
+    if (!authServiceUrl) {
+      throw new Error('AUTH_SERVICE_URL is not configured');
+    }
+    this.baseUrl = authServiceUrl;
   }
 
   async forward(request: ProxyRequest): Promise<ProxyResponse> {

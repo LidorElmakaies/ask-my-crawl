@@ -13,6 +13,7 @@ services:
       # service names, not localhost.
       - REDIS_URL=redis://redis:6379
       - SEAWEEDFS_ENDPOINT=http://seaweedfs:8333
+      - KAFKA_BROKERS=kafka:19092
       # OpenTelemetry — service.name must be unique per service; the collector lives on the
       # shared `observability` network (see the root docker-compose.yml's networks: block).
       - OTEL_SERVICE_NAME=scraper

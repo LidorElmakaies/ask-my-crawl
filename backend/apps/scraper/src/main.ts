@@ -8,6 +8,11 @@ import { KAFKA_CONSUMER_GROUPS } from '@app/kafka-contracts';
 import { ScraperModule } from './scraper.module';
 
 async function bootstrap() {
+  const kafkaBrokers = process.env.KAFKA_BROKERS;
+  if (!kafkaBrokers) {
+    throw new Error('KAFKA_BROKERS is not configured');
+  }
+
   // No HTTP surface — Kafka-only microservice.
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(
     ScraperModule,
@@ -17,7 +22,7 @@ async function bootstrap() {
       options: {
         client: {
           clientId: 'scraper',
-          brokers: (process.env.KAFKA_BROKERS ?? 'kafka:19092').split(','), // container-network default
+          brokers: kafkaBrokers.split(','),
         },
         consumer: { groupId: KAFKA_CONSUMER_GROUPS.SCRAPER },
       },

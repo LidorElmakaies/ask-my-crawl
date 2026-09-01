@@ -20,13 +20,18 @@ async function bootstrap() {
   app.use(createRequestLoggingMiddleware(logger));
   app.enableCors({ origin: true });
 
+  const kafkaBrokers = process.env.KAFKA_BROKERS;
+  if (!kafkaBrokers) {
+    throw new Error('KAFKA_BROKERS is not configured');
+  }
+
   // Connect Kafka microservice for consuming job-requests and answer-ready events
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.KAFKA,
     options: {
       client: {
         clientId: 'job-manager',
-        brokers: (process.env.KAFKA_BROKERS ?? 'kafka:19092').split(','),
+        brokers: kafkaBrokers.split(','),
       },
       consumer: { groupId: KAFKA_CONSUMER_GROUPS.JOB_MANAGER },
     },

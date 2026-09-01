@@ -14,8 +14,10 @@ export class OpenAiEmbeddingClient implements IEmbeddingClient {
   private readonly expectedDimension: number;
 
   constructor(config: ConfigService) {
-    const baseURL =
-      config.get<string>('EMBEDDING_BASE_URL') ?? 'http://localhost:1234/v1';
+    const baseURL = config.get<string>('EMBEDDING_BASE_URL');
+    if (!baseURL) {
+      throw new Error('EMBEDDING_BASE_URL is not configured');
+    }
     const model =
       config.get<string>('EMBEDDING_MODEL') ??
       'text-embedding-nomic-embed-text-v1.5';

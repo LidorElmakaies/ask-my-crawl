@@ -26,13 +26,14 @@ export class ToolProxyModule implements NestModule {
   constructor(private readonly config: ConfigService) {}
 
   configure(consumer: MiddlewareConsumer): void {
-    // Container-network defaults (service name, not localhost — see devops.md's non-negotiables),
-    // overridable via env for local (non-Docker) `npx nest start gateway`. Same pattern as
-    // AuthServiceHttpClient's AUTH_SERVICE_URL.
-    const grafanaTarget =
-      this.config.get<string>('GRAFANA_URL') ?? 'http://grafana:3000';
-    const kafkaUiTarget =
-      this.config.get<string>('KAFKA_UI_URL') ?? 'http://kafka-ui:8080';
+    const grafanaTarget = this.config.get<string>('GRAFANA_URL');
+    if (!grafanaTarget) {
+      throw new Error('GRAFANA_URL is not configured');
+    }
+    const kafkaUiTarget = this.config.get<string>('KAFKA_UI_URL');
+    if (!kafkaUiTarget) {
+      throw new Error('KAFKA_UI_URL is not configured');
+    }
 
     // Route pattern verified empirically against this repo's actual installed Express 5 / Nest 11
     // (path-to-regexp v8 — bare `*` wildcards are rejected outright, see the plan doc's flagged

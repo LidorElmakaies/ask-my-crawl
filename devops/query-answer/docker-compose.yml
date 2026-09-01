@@ -13,6 +13,7 @@ services:
       - VECTOR_DB_URL=http://qdrant:6333
       - EMBEDDING_BASE_URL=http://host.docker.internal:1234/v1 # LM Studio, not containerized
       - LLM_BASE_URL=http://host.docker.internal:1234/v1 # same local LM Studio instance; swappable to a hosted OpenAI-compatible provider via env only
+      - KAFKA_BROKERS=kafka:19092
       - OTEL_SERVICE_NAME=query-answer
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     # No ports: — Kafka-only microservice, no HTTP surface.

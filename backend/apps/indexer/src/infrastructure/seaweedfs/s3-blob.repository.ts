@@ -12,8 +12,10 @@ export class S3BlobRepository implements IBlobRepository {
   private readonly bucket: string;
 
   constructor(config: ConfigService) {
-    const endpoint =
-      config.get<string>('SEAWEEDFS_ENDPOINT') ?? 'http://seaweedfs:8333';
+    const endpoint = config.get<string>('SEAWEEDFS_ENDPOINT');
+    if (!endpoint) {
+      throw new Error('SEAWEEDFS_ENDPOINT is not configured');
+    }
     this.bucket =
       config.get<string>('SEAWEEDFS_BUCKET') ?? 'askmycrawl-raw-html';
     this.client = new S3Client({
