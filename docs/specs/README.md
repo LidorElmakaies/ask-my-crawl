@@ -3,6 +3,10 @@
 Formal specification set, superseding the raw capture in [`../planning/01-architecture-notes.md`](../planning/01-architecture-notes.md)
 (kept around as the record of *why* these decisions were made).
 
+**[full-spec.md](full-spec.md) consolidates every file below into one single-file read** — start
+there for a top-to-bottom pass; the per-topic files stay as the deeper reference on any one area.
+Diagrams (flowcharts + sequence diagrams) live in [docs/diagrams/](../diagrams/README.md).
+
 - [data-model.md](data-model.md) — Postgres schema (relational data only — embeddings live in
   Qdrant, not pgvector), which service owns which tables
 - [event-schemas.md](event-schemas.md) — Kafka topics, message shapes, producers/consumers
@@ -24,8 +28,8 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
   See [planning notes §2](../planning/01-architecture-notes.md#2-language--decided-nestjs-nodejstypescript-all-services)
   for the "why."
 - **Message bus**: Kafka (via `@nestjs/microservices`) — `backend/libs/kafka-contracts` (topic
-  names + message shapes) and the broker/topic-init exist; Job Manager Service, the Scraper, and the
-  Indexer are all real producers/consumers today. **BullMQ** (Redis-backed) sits alongside Kafka for
+  names + message shapes) and the broker/topic-init exist; Job Manager Service, the Scraper, the
+  Indexer, and Query/Answer Service are all real producers/consumers today. **BullMQ** (Redis-backed) sits alongside Kafka for
   the Scraper's and Indexer's own retry/backoff (`process-url`, `index-page` queues), used raw
   (`bullmq`'s own `Queue`/`Worker` classes, not `@nestjs/bullmq`'s decorators — matches this
   project's existing kafkajs-used-raw precedent) — see
@@ -59,25 +63,22 @@ For working this project with agentic teams (Claude Code subagents, spawnable vi
 
 ## Not yet built
 
-The crawl-and-index pipeline is complete and working end to end — a submitted job gets crawled,
-scraped, chunked, embedded, and stored in Qdrant. What's missing is the step that turns that into an
-actual answer:
+The full RAG loop is complete and working end to end — a submitted job gets crawled, scraped,
+chunked, embedded, stored in Qdrant, and answered by an LLM, with the answer pushed live over
+WebSocket. What's missing is a second, additive notification channel on top of that:
 
-- **Query/Answer Service** — not implemented. The one remaining piece of the RAG loop: on
-  `crawl-complete`, retrieve the top-k relevant chunks from the Indexer for the job's query, pass
-  them plus the query to an LLM, publish `answer-ready`. See `services.md`'s Query/Answer section.
 - **Notification Service** — not implemented. On `answer-ready`, send email/SMS/Telegram.
 
 ## Still open (tracked, not blocking)
 
-- LLM (answer-generation) provider for Query/Answer Service — not decided.
-- Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives).
+- Email/SMS provider choice (SMTP vs SendGrid/etc., Twilio vs alternatives) — Notification Service
+  itself isn't built yet either.
 - Telegram account-linking flow (bot deep-link / linking code).
 - CORS is permissively open (`origin: true`) on the Gateway for this dev phase — needs locking down
   to specific origins before any real deployment.
 - Whether refresh tokens (or an access-token revocation list) should move to Redis for faster
   lookups — not decided.
 - Per-domain rate limiting for the Scraper — not implemented.
-- The Indexer's query-time retrieval API for Query/Answer Service — not designed yet, see
-  `services.md`'s Indexer section.
+- `handleUnsupportedContentType` (non-HTML scrape responses) is a deliberate stub — real behavior
+  not decided.
 - IaC tool (Terraform vs CDK) and CI/CD pipeline for AWS deployment.
