@@ -80,7 +80,12 @@ function CustomTabBar({ navigation, state }) {
         return (
           <TouchableOpacity
             key={tab.name}
-            onPress={() => navigation.navigate(tab.name)}
+            onPress={() =>
+              navigation.navigate(
+                tab.name,
+                tab.name === 'admin' ? { screen: 'index' } : undefined,
+              )
+            }
             style={styles.tab}
             activeOpacity={0.7}
           >

@@ -16,6 +16,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=scraper
     # No ports: — Kafka-only microservice, no HTTP surface. Same reasoning as job-manager.
+    # 2 replicas by default — see docs/planning/03-crawler-scraper-indexing-plan.md §1.
+    deploy:
+      replicas: 2
     depends_on:
       kafka:
         condition: service_healthy

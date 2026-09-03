@@ -61,3 +61,7 @@ export function getQueryError(query) {
   }
   return null;
 }
+
+// Mirrors MAX_CRAWL_DEPTH in apps/gateway/src/jobs-proxy/application/constants.ts — the picker in
+// scraper.js only ever offers 1..this, so there's no free-text depth input left to validate.
+export const MAX_CRAWL_DEPTH = 10;

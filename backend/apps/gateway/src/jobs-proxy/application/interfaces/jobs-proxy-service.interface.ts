@@ -1,6 +1,7 @@
 export interface CreateJobInput {
   url: string;
   query: string;
+  depth?: number;
 }
 
 export interface ProxyResponse {

@@ -52,9 +52,12 @@ WebSocket, but nothing emails/texts/Telegrams the user about it yet.
 
 - **Owns**: nothing in Postgres — stateless HTTP/WS edge.
 - **Responsibilities**: terminate HTTP + WebSocket connections; verify JWT locally (see `auth.md`);
-  proxy `/auth/*` to Auth Service; on `POST /jobs`, publish a `job-requests` message and respond
-  `202` immediately — no synchronous call to Job Manager Service, no `job_id` yet (see
-  `api-contracts.md`); on `GET /jobs*`, call Job Manager Service internally; on
+  proxy `/auth/*` to Auth Service; on `POST /jobs`, validate `{url, query, depth?}` via
+  `CreateJobRequestDto` (`depth` optional, 1..`MAX_CRAWL_DEPTH`, defaulted to the ceiling when
+  omitted — the only server-side enforcement of that cap, since no other service is reachable from
+  outside the Gateway), publish a `job-requests` message and respond `202` immediately — no
+  synchronous call to Job Manager Service, no `job_id` yet (see `api-contracts.md`); on
+  `GET /jobs*`, call Job Manager Service internally; on
   `GET/PATCH /admin/users*`, call Auth Service internally; maintain an in-memory (or Redis-backed,
   for multi-instance deployments) `user_id → WebSocket` registry; consume `job-created` and
   `result-saved`, pushing each to the matching connection as `job.created` / `job.completed`
@@ -86,7 +89,9 @@ src/auth-proxy/`); Auth Service isn't reachable from the frontend directly, only
   (`SADD crawl:{job_id}:visited`, Redis) and enqueues onto the `process-url` BullMQ queue.
 - **Scraper Worker(s)** — BullMQ workers on `process-url`. Fetch over plain HTTP (30s timeout, no
   headless browser), save raw HTML to SeaweedFS, extract and filter outbound links (same-domain,
-  depth < 3), re-publish children onto `crawl-frontier`, publish `page-scraped` for the Indexer.
+  still within the message's own remaining-hops `depth` — the Scraper only decrements and checks
+  that field, it has no notion of `MAX_CRAWL_DEPTH` itself, see `data-model.md`), re-publish
+  children onto `crawl-frontier`, publish `page-scraped` for the Indexer.
 - **Owns**: nothing in Postgres. Shares per-job coordination state in Redis with the Indexer (dedup
   set, pending counters, completion metadata — not "owned" data in the `data-model.md` sense, see
   the planning doc).
@@ -141,26 +146,58 @@ the Scraper/Indexer, there's no per-job fan-in to coordinate here:
   directly (a trivial passthrough, same shape as the Indexer's Index Intake Consumer minus the
   BullMQ bridge — `crawl-complete`→`answer-ready` is a strict 1:1 mapping, so there's no queue to
   bridge onto).
-- **AnsweringService** — embeds the job's `query` (own scoped copy of the Indexer's
-  `OpenAiEmbeddingClient` — same `EMBEDDING_BASE_URL`/`EMBEDDING_MODEL`/`EMBEDDING_DIMENSION` config,
-  since query and document vectors must share one embedding space for cosine similarity to mean
-  anything), searches **Qdrant directly** for the top-k chunks filtered by `job_id` (own scoped
-  Qdrant read client — see "Retrieval" below), builds a system+user RAG prompt from whatever chunks
-  come back (including the zero-chunks case — the LLM is still called and told plainly that no
-  crawled content was found, rather than a hand-rolled canned answer), calls the LLM, and publishes
-  `answer-ready` with `answer_text` set. On a transient failure (embedding/Qdrant/LLM calls), retries
-  by republishing `crawl-complete` with `retry_count` incremented and a short backoff
-  (`2s * 2^retry_count`, capped at 30s) — a Kafka-native retry loop, not BullMQ's attempts/backoff.
-  Once `retry_count` exceeds `ANSWER_MAX_RETRIES` (default 5), or immediately on a
-  `PermanentAnswerError` (e.g. an embedding dimension mismatch — retrying can never help), it gives
-  up and publishes `answer-ready` with `failed_reason` set instead. See `event-schemas.md`'s
-  `crawl-complete`/`answer-ready` sections for the exact wire shapes.
+- **AnsweringService** — orchestrates multi-query, dual-modality retrieval before ever calling the
+  answering LLM (added after a reproduced bug: a single-phrasing, dense-only top-5 search missed
+  the one chunk that literally answered the question, because it scored a few ranks below several
+  topically-similar-but-wrong chunks — see `docs/planning/04-retrieval-quality-plan.md` for the
+  incident and the full design rationale). The pipeline:
+  1. **Query expansion** — `IQueryExpander` (own scoped LangChain `ChatOpenAI` client, same
+     `LLM_BASE_URL`/`LLM_MODEL` config as the answering LLM below, independently swappable) asks
+     the LLM for exactly `QUERY_EXPANSION_COUNT` (2) rewrites of the job's `query`: one broader
+     paraphrase in different vocabulary, one that keeps the original's distinctive/unusual words
+     verbatim but restructures the sentence. The **original query is always kept** as a third
+     variant — never replaced — so a rewrite that drifts off-topic can't crowd it out. On any
+     failure (LLM unreachable, unparseable output), falls back to the original query alone; this
+     step degrades gracefully, it never fails the job.
+  2. **Retrieval, both modalities, every variant** — all 3 query variants are embedded in one
+     batched call (own scoped copy of the Indexer's `OpenAiEmbeddingClient` — same
+     `EMBEDDING_BASE_URL`/`EMBEDDING_MODEL`/`EMBEDDING_DIMENSION` config, since query and document
+     vectors must share one embedding space) and searched against Qdrant directly
+     (`IVectorRetriever`, dense/cosine similarity, `job_id`-scoped) — **and**, in parallel, all 3
+     variants are searched via `ILexicalRetriever` (in-process Okapi BM25 keyword/term-overlap
+     scoring over the job's chunk set, fetched once via a `job_id`-scoped Qdrant scroll — no
+     separate search engine needed at this project's per-job scale). Each modality×variant search
+     returns up to `RETRIEVAL_TOP_K` (15) candidates.
+  3. **Fusion** — Reciprocal Rank Fusion (`reciprocalRankFusion()`, pure/I/O-free, `models/`)
+     combines the 3 dense-search ranked lists into one, and separately combines the 3 lexical-search
+     ranked lists into another, each kept to its own top `FUSION_TOP_K_PER_MODALITY` (5). This is
+     two-stage (fuse within each modality first, then merge the two top-5s, then dedupe overlaps by
+     `url`+chunk index) rather than one flat RRF pass over all 6 lists — a flat pass risks one
+     modality's votes dominating every rank across every variant (e.g. if all 3 rewrites still share
+     literal keywords, BM25 could sweep every slot); the two-stage version guarantees the final
+     context always has candidates from both retrieval strategies. RRF fuses purely by each
+     candidate's *rank* per list, never its raw score, which is what makes it valid to combine dense
+     cosine-similarity scores and BM25 term-overlap scores without normalizing them onto a shared
+     scale first.
+  4. **Answer** — builds the system+user RAG prompt from the fused, deduped chunk set (up to 10,
+     usually fewer once both modalities' picks overlap), including the zero-chunks case (the LLM is
+     still called and told plainly that no crawled content was found, rather than a hand-rolled
+     canned answer), calls the answering LLM, and publishes `answer-ready` with `answer_text` set.
+  On a transient failure anywhere in this pipeline (embedding/Qdrant/LLM calls), retries by
+  republishing `crawl-complete` with `retry_count` incremented and a short backoff (`2s *
+  2^retry_count`, capped at 30s) — a Kafka-native retry loop, not BullMQ's attempts/backoff. Once
+  `retry_count` exceeds `ANSWER_MAX_RETRIES` (default 5), or immediately on a `PermanentAnswerError`
+  (e.g. an embedding dimension mismatch — retrying can never help), it gives up and publishes
+  `answer-ready` with `failed_reason` set instead. See `event-schemas.md`'s `crawl-complete`/
+  `answer-ready` sections for the exact wire shapes.
 - **Owns**: nothing in Postgres.
-- **Talks to**: Qdrant (read-only similarity search, direct — see below), an LLM (OpenAI-compatible
-  HTTP API — see below), Kafka (`crawl-complete` in and out — see above, `answer-ready` out).
+- **Talks to**: Qdrant (read-only, both similarity search and scroll — direct, see below), an LLM
+  (OpenAI-compatible HTTP API, both for query expansion and for the final answer — see below), Kafka
+  (`crawl-complete` in and out — see above, `answer-ready` out).
 
 **Retrieval — resolved**: Query/Answer reads Qdrant **directly**, via its own scoped embedding +
-Qdrant-read client, rather than through a new Indexer HTTP endpoint. This follows the project's
+Qdrant-read clients (`IVectorRetriever` for similarity search, `ILexicalRetriever` for the BM25
+scroll-and-score path), rather than through a new Indexer HTTP endpoint. This follows the project's
 existing precedent for shared infra — Redis is already accessed via independent scoped client
 copies per service (see `data-model.md`'s Redis section) rather than through one owning service's
 API — and keeps the Indexer's "Kafka-only, no HTTP surface" trait intact; the Indexer still owns
@@ -194,11 +231,12 @@ of the `jobs` table, and exposes internal `GET /jobs` and `GET /jobs/:id` endpoi
 
 - **Owns**: `jobs` — one table: `id` (generated), `user_id`, `url`, `query`, `result` (`NULL` until
   answered), `failed_reason` (`NULL` unless Query/Answer gave up).
-- **Responsibilities**: consumes `job-requests` (`{user_id, url, query}`); generates a `job_id` and
-  inserts the `jobs` row with those 3 fields plus the new `id` and `NULL` `result`/`failed_reason`;
-  publishes the seed `crawl-frontier` message (`{job_id, user_id, url, depth: MAX_CRAWL_DEPTH,
-  query}`); publishes `job-created` so Gateway can relay the new `job_id` to the submitting user over
-  WebSocket. On `answer-ready`, writes `jobs.result` (clearing `failed_reason`) or `jobs.failed_reason`
+- **Responsibilities**: consumes `job-requests` (`{user_id, url, query, depth}`); generates a
+  `job_id` and inserts the `jobs` row with `user_id`/`url`/`query` plus the new `id` and `NULL`
+  `result`/`failed_reason` — `depth` is not one of the columns (see `data-model.md`); publishes the
+  seed `crawl-frontier` message (`{job_id, user_id, url, depth, query}`, `depth` carried straight
+  through from job-requests, already resolved/validated by the Gateway); publishes `job-created` so
+  Gateway can relay the new `job_id` to the submitting user over WebSocket. On `answer-ready`, writes `jobs.result` (clearing `failed_reason`) or `jobs.failed_reason`
   depending on which the message carries, then publishes `result-saved` with the matching shape. On
   `GET /jobs`, returns user-scoped or admin-filtered jobs. On `POST /jobs/:id/retry`, verifies
   ownership, rejects if the job has no `failed_reason` to retry, clears it, and republishes

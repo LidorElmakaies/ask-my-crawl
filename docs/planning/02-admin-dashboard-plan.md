@@ -302,3 +302,13 @@ Match both files' existing comment density/style (explain "why," pinned versions
 4. Test at least once on native (Expo Go/simulator) if available — `react-native-webview` can behave
    differently there than the web build's iframe-based shim; acceptable to defer if unavailable, but
    note it as untested rather than assuming parity.
+
+## Proxied request bodies
+
+`NestFactory.create()` applies Express's body parser globally, ahead of this route-scoped proxy
+middleware, so a proxied POST/PUT's body arrives at `tool-proxy.factory.ts` already drained into
+`req.body` — `http-proxy-middleware`'s `fixRequestBody` (passed as `on.proxyReq`) re-serializes it
+back onto the outgoing request before it's piped upstream. This matters concretely for Grafana:
+dashboard panels query their datasources via `POST /api/ds/query` on every load/refresh. Fixed
+once in the shared factory, so Kafka UI's own POST routes get it too. Verification of any future
+tool added to this proxy should include a real POST with a body, not GET requests alone.

@@ -11,7 +11,8 @@ explaining the reasoning behind them.
   - **User**: can only view/update their own requests and results.
 - Core action: user submits a **URL + a question/query**. Crawling happens in the background — the
   user can navigate away and come back.
-- Crawl depth is capped at **3**.
+- Crawl depth is capped at **10** (raised from the original **3** — see `MAX_CRAWL_DEPTH` in
+  `apps/gateway/src/jobs-proxy/application/constants.ts`, the only place this ceiling exists).
 - On completion the user is notified three ways: **email**, **SMS**, and **Telegram** (a Telegram
   Bot API chat message to the user's linked chat ID).
 - Frontend also gets a **live update** (WebSocket) so the answer shows up in the UI tab without a

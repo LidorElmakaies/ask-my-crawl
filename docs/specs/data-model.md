@@ -84,14 +84,18 @@ Service adds only the generated `id` and a `result` that starts `NULL`.
 
 Real gaps in this table, worth stating plainly rather than glossing over:
 
-- **No max-depth column.** Max crawl depth is a fixed system constant (`MAX_CRAWL_DEPTH`, currently
-  `3` per the product spec, "crawl depth is capped at 3"), never client-provided and never varies
-  per job today, so there's nothing to store per row. It lives in `libs/kafka-contracts` (not
-  Scraper-local — Job Manager Service is the one that has to set it, as the starting value of the
-  `crawl-frontier` seed message's `depth` field — see `event-schemas.md`), since both Job Manager
-  Service (producer) and the Scraper (consumer/decrementer) need to agree on it. May become
-  configurable (e.g. per-job or per-user-tier) later; nothing reads it as anything but a constant
-  today.
+- **No max-depth column.** `depth` **is** client-provided and does vary per job now (`POST /jobs`'s
+  optional `depth`, 1..`MAX_CRAWL_DEPTH`, defaulted to the ceiling when omitted — see
+  `api-contracts.md`) — it's just never persisted to this row. `MAX_CRAWL_DEPTH` itself (currently
+  `10` — raised from the original product spec's `3`, see
+  `docs/planning/01-architecture-notes.md`) lives **only** in the Gateway
+  (`apps/gateway/src/jobs-proxy/application/constants.ts`) — deliberately not in the shared
+  `libs/kafka-contracts`, so no other backend service can see or depend on the ceiling, only the
+  Gateway's `CreateJobRequestDto` enforces it and `JobsProxyService` resolves the default. By the
+  time `depth` reaches Job Manager Service or the Scraper (via the `crawl-frontier` seed message's
+  own `depth` field — see `event-schemas.md`), it's just a plain number they pass through/decrement,
+  with no notion of what the ceiling was or is. Nothing downstream needs the originally-requested
+  depth after the seed message is published, so there's nothing to store per row.
 - **No status column.** "Done" is `result IS NOT NULL OR failed_reason IS NOT NULL`. There is still
   no in-between state (`crawling`/`answering`) represented anywhere in Postgres — only the terminal
   success/failure outcomes are captured, via `result`/`failed_reason`.

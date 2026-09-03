@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { JOB_REQUESTS_PUBLISHER, JOB_SERVICE_CLIENT } from '../../tokens';
+import { MAX_CRAWL_DEPTH } from './constants';
 import type { IJobRequestsPublisher } from '../infrastructure/interfaces/job-requests-publisher.interface';
 import type { IJobServiceClient } from '../infrastructure/interfaces/job-service-client.interface';
 import type {
@@ -26,6 +27,7 @@ export class JobsProxyService implements IJobsProxyService {
       user_id: userId,
       url: input.url,
       query: input.query,
+      depth: input.depth ?? MAX_CRAWL_DEPTH,
     });
 
     return { status: 'accepted' };

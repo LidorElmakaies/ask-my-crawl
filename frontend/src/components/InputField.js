@@ -10,13 +10,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../hooks/useAppTheme';
 
 /**
- * Shared, reusable text input — label + input + optional error text, themed via useAppTheme()
- * like everything else. Use this everywhere a labeled input is needed (URL/query submission,
- * register, login, ...) instead of hand-rolling a TextInput per screen.
+ * Shared, reusable text input — label + input + optional hint/error/char-count, themed via
+ * useAppTheme(). Use this everywhere a labeled input is needed instead of hand-rolling a
+ * TextInput per screen.
  *
- * Pass `isPassword` for the password-specific variant (register/login) — same component, adds a
- * show/hide toggle instead of a plain `secureTextEntry` field with no way to check what you typed.
- * Don't pass both `isPassword` and `secureTextEntry` — `isPassword` manages visibility itself.
+ * `isPassword` adds a show/hide toggle instead of a plain `secureTextEntry` field. `glow` adds a
+ * focus-glow shadow (off by default, so existing screens keep their current look). `hint` renders
+ * a muted caption under the label; `maxLength` + `showCharCount` render a "n/max" counter next to
+ * it. `inputStyle` sizes the input itself (width/height/...); `style` sizes the outer wrapper.
  */
 export default function InputField({
   label,
@@ -24,11 +25,19 @@ export default function InputField({
   onChangeText,
   placeholder,
   error,
+  hint,
   secureTextEntry,
   isPassword,
   keyboardType = 'default',
   autoCapitalize = 'none',
+  autoCorrect,
+  multiline,
+  monospace,
+  maxLength,
+  showCharCount,
+  glow,
   style,
+  inputStyle,
 }) {
   const { colors } = useAppTheme();
   const [focused, setFocused] = useState(false);
@@ -42,8 +51,30 @@ export default function InputField({
 
   return (
     <View style={[styles.wrapper, style]}>
-      {label ? (
-        <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
+      {label || showCharCount ? (
+        <View style={styles.labelRow}>
+          {label ? (
+            <Text style={[styles.label, { color: colors.textMuted }]}>
+              {label}
+            </Text>
+          ) : null}
+          {showCharCount ? (
+            <Text
+              style={[
+                styles.charCount,
+                {
+                  color:
+                    value.length > maxLength ? colors.error : colors.textMuted,
+                },
+              ]}
+            >
+              {value.length}/{maxLength}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+      {hint ? (
+        <Text style={[styles.hint, { color: colors.textMuted }]}>{hint}</Text>
       ) : null}
       <View style={styles.inputRow}>
         <TextInput
@@ -54,16 +85,28 @@ export default function InputField({
           secureTextEntry={isPassword ? !reveal : secureTextEntry}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
+          autoCorrect={autoCorrect}
+          multiline={multiline}
+          maxLength={maxLength}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={[
             styles.input,
             isPassword && styles.inputWithToggle,
+            multiline && styles.inputMultiline,
+            monospace && styles.inputMonospace,
             {
               backgroundColor: colors.inputBg,
               borderColor,
               color: colors.text,
             },
+            glow && {
+              shadowColor: focused ? colors.primary : 'transparent',
+              shadowOpacity: 0.4,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 0 },
+            },
+            inputStyle,
           ]}
         />
         {isPassword ? (
@@ -91,11 +134,23 @@ const styles = StyleSheet.create({
   wrapper: {
     gap: 6,
   },
+  labelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   label: {
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  charCount: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  hint: {
+    fontSize: 12,
   },
   inputRow: {
     position: 'relative',
@@ -110,6 +165,13 @@ const styles = StyleSheet.create({
   },
   inputWithToggle: {
     paddingRight: 44,
+  },
+  inputMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top', // Android: multiline text starts at the top, not vertically centered
+  },
+  inputMonospace: {
+    fontFamily: 'monospace',
   },
   toggle: {
     position: 'absolute',

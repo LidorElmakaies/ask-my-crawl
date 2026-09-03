@@ -32,6 +32,12 @@ producers and BullMQ enqueue calls are Infrastructure-layer everywhere (`IEventP
 `IProcessUrlQueue`/`IIndexPageQueue`); Kafka consumers and BullMQ workers are API-layer — per
 `backend-architecture.md`, not re-litigated here.
 
+**Deployment: both default to 2 replicas** (`deploy.replicas: 2` in `devops/scraper|indexer/
+docker-compose.yml`, honored directly by `docker compose up`, no Swarm needed). Safe because
+neither holds per-instance state — coordination lives in shared Redis — and neither has a `ports:`
+or `container_name:` to collide. Raised from 1 alongside `MAX_CRAWL_DEPTH` going from 3 to 10 (a
+deeper default crawl means more pages to fetch/chunk/embed per job).
+
 ## 2. URL handling
 
 **No general URL normalization.** A different `?query=...` string can legitimately serve different

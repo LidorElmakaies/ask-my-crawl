@@ -19,13 +19,14 @@ export async function fetchJobs(token) {
 /**
  * Submits an asynchronous crawl & answer job.
  * @param {string} token - Bearer access token
- * @param {{ url: string, query: string }} input - URL and question
+ * @param {{ url: string, query: string, depth?: number }} input - URL, question, and an optional
+ *   crawl-hop budget (1..MAX_CRAWL_DEPTH)
  * @returns {Promise<{ status: string }>}
  */
-export async function createJob(token, { url, query }) {
+export async function createJob(token, { url, query, depth }) {
   const response = await authorizedFetch(URLS.jobs.list, token, {
     method: 'POST',
-    body: JSON.stringify({ url, query }),
+    body: JSON.stringify({ url, query, depth }),
   });
   return response.json();
 }

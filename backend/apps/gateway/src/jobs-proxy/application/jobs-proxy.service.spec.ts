@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/unbound-method --
    false positive: these are jest.fn() mocks, not real prototype methods relying on `this`. */
+import { MAX_CRAWL_DEPTH } from './constants';
 import type { IJobRequestsPublisher } from '../infrastructure/interfaces/job-requests-publisher.interface';
 import type { IJobServiceClient } from '../infrastructure/interfaces/job-service-client.interface';
 import { JobsProxyService } from './jobs-proxy.service';
@@ -24,14 +25,27 @@ describe('JobsProxyService', () => {
     const result = await service.createJob('user-1', {
       url: 'https://example.com',
       query: 'What is this?',
+      depth: 5,
     });
 
     expect(publisher.publish).toHaveBeenCalledWith({
       user_id: 'user-1',
       url: 'https://example.com',
       query: 'What is this?',
+      depth: 5,
     });
     expect(result).toEqual({ status: 'accepted' });
+  });
+
+  it('defaults depth to MAX_CRAWL_DEPTH when the client omits it', async () => {
+    await service.createJob('user-1', {
+      url: 'https://example.com',
+      query: 'What is this?',
+    });
+
+    expect(publisher.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ depth: MAX_CRAWL_DEPTH }),
+    );
   });
 
   it('forwards queries to job service client on forward', async () => {

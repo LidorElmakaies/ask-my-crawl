@@ -16,6 +16,9 @@ services:
     environment:
       - OTEL_SERVICE_NAME=indexer
     # No ports: — Kafka-only microservice, no HTTP surface.
+    # 2 replicas by default — see docs/planning/03-crawler-scraper-indexing-plan.md §1.
+    deploy:
+      replicas: 2
     extra_hosts:
       - "host.docker.internal:host-gateway" # for Linux Docker hosts; no-op on Docker Desktop
     depends_on:

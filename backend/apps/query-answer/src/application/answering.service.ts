@@ -8,53 +8,56 @@ import type { IEventPublisher } from '@app/kafka-client';
 import {
   EMBEDDING_CLIENT,
   EVENT_PUBLISHER,
+  LEXICAL_RETRIEVER,
   LLM_CLIENT,
+  QUERY_EXPANDER,
   VECTOR_RETRIEVER,
 } from '../tokens';
 import {
   ANSWER_MAX_RETRIES,
   ANSWER_RETRY_BACKOFF_BASE_MS,
   ANSWER_RETRY_BACKOFF_CAP_MS,
+  FUSION_TOP_K_PER_MODALITY,
 } from '../models/constants';
 import { PermanentAnswerError } from '../models/permanent-answer-error';
+import type { RetrievedChunk } from '../models/retrieved-chunk';
+import { reciprocalRankFusion } from '../utils/reciprocal-rank-fusion';
+import { dedupeChunks } from '../utils/chunk-utils';
+import {
+  ANSWERING_SYSTEM_PROMPT,
+  buildAnsweringUserPrompt,
+} from '../utils/prompts';
 import type { IEmbeddingClient } from '../infrastructure/interfaces/embedding-client.interface';
-import type {
-  IVectorRetriever,
-  RetrievedChunk,
-} from '../infrastructure/interfaces/vector-retriever.interface';
+import type { IVectorRetriever } from '../infrastructure/interfaces/vector-retriever.interface';
+import type { ILexicalRetriever } from '../infrastructure/interfaces/lexical-retriever.interface';
 import type { ILlmClient } from '../infrastructure/interfaces/llm-client.interface';
+import type { IQueryExpander } from '../infrastructure/interfaces/query-expander.interface';
 import type { IAnsweringUseCase } from './interfaces/answering-use-case.interface';
-
-const SYSTEM_PROMPT =
-  'You are an assistant answering questions about the content of web pages that were crawled ' +
-  'for the user. Answer ONLY using the provided context below — never use outside knowledge, ' +
-  "and never make anything up. If the context doesn't contain enough information to answer the " +
-  'question, say so honestly instead of guessing.';
 
 @Injectable()
 export class AnsweringService implements IAnsweringUseCase {
   private readonly logger = new Logger(AnsweringService.name);
 
   constructor(
+    @Inject(QUERY_EXPANDER) private readonly queryExpander: IQueryExpander,
     @Inject(EMBEDDING_CLIENT)
     private readonly embeddingClient: IEmbeddingClient,
     @Inject(VECTOR_RETRIEVER)
     private readonly vectorRetriever: IVectorRetriever,
+    @Inject(LEXICAL_RETRIEVER)
+    private readonly lexicalRetriever: ILexicalRetriever,
     @Inject(LLM_CLIENT) private readonly llmClient: ILlmClient,
     @Inject(EVENT_PUBLISHER) private readonly eventPublisher: IEventPublisher,
   ) {}
 
   async handle(message: CrawlCompleteMessage): Promise<void> {
     try {
-      const [queryVector] = await this.embeddingClient.embed([message.query]);
-      const chunks = await this.vectorRetriever.search(
-        queryVector,
-        message.job_id,
-      );
+      const queries = await this.queryExpander.expand(message.query);
+      const chunks = await this.retrieveChunks(queries, message.job_id);
 
-      const userPrompt = this.buildUserPrompt(message.query, chunks);
+      const userPrompt = buildAnsweringUserPrompt(message.query, chunks);
       const answerText = await this.llmClient.generateAnswer(
-        SYSTEM_PROMPT,
+        ANSWERING_SYSTEM_PROMPT,
         userPrompt,
       );
 
@@ -62,6 +65,39 @@ export class AnsweringService implements IAnsweringUseCase {
     } catch (err) {
       await this.handleFailure(message, err as Error);
     }
+  }
+
+  // Two-stage RRF: dense and lexical modalities are fused separately, then merged+deduped. See
+  // docs/planning/04-retrieval-quality-plan.md.
+  private async retrieveChunks(
+    queries: string[],
+    jobId: string,
+  ): Promise<RetrievedChunk[]> {
+    const [denseLists, lexicalLists] = await Promise.all([
+      this.searchDense(queries, jobId),
+      this.lexicalRetriever.searchMany(queries, jobId),
+    ]);
+
+    const fusedDense = reciprocalRankFusion(denseLists).slice(
+      0,
+      FUSION_TOP_K_PER_MODALITY,
+    );
+    const fusedLexical = reciprocalRankFusion(lexicalLists).slice(
+      0,
+      FUSION_TOP_K_PER_MODALITY,
+    );
+
+    return dedupeChunks([...fusedDense, ...fusedLexical]);
+  }
+
+  private async searchDense(
+    queries: string[],
+    jobId: string,
+  ): Promise<RetrievedChunk[][]> {
+    const vectors = await this.embeddingClient.embed(queries);
+    return Promise.all(
+      vectors.map((vector) => this.vectorRetriever.search(vector, jobId)),
+    );
   }
 
   private async handleFailure(
@@ -127,21 +163,5 @@ export class AnsweringService implements IAnsweringUseCase {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private buildUserPrompt(query: string, chunks: RetrievedChunk[]): string {
-    if (chunks.length === 0) {
-      return (
-        'No content was retrieved from the crawl for this question — the crawl may have failed ' +
-        'to index any pages, or nothing relevant was found.\n\n' +
-        `Question: ${query}`
-      );
-    }
-
-    const context = chunks
-      .map((chunk, i) => `[${i + 1}] (source: ${chunk.url})\n${chunk.text}`)
-      .join('\n\n');
-
-    return `Context from the crawled pages:\n\n${context}\n\nQuestion: ${query}`;
   }
 }

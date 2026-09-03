@@ -87,11 +87,29 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # See docs/planning/05-grafana-jwt-auth.md.
+  grafana-jwt-keygen:
+    image: alpine:3.22.1
+    volumes:
+      - grafana-jwt-keys:/keys
+    networks:
+      - observability
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        set -e &&
+        apk add --no-cache openssl >/dev/null &&
+        if [ ! -f /keys/private.pem ]; then
+          openssl genpkey -algorithm RSA -out /keys/private.pem -pkeyopt rsa_keygen_bits:2048 &&
+          openssl rsa -pubout -in /keys/private.pem -out /keys/public.pem;
+        fi
+
   grafana:
     image: grafana/grafana:13.2.0
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./data/grafana:/var/lib/grafana
+      - grafana-jwt-keys:/etc/grafana/jwt:ro
     # No host port publish (was "3001:3000") — see docs/planning/02-admin-dashboard-plan.md,
     # Decision 4. Grafana is now reachable only through the Gateway's admin-gated reverse proxy
     # (backend/apps/gateway/src/tool-proxy/), at /admin/grafana on the Gateway's own origin
@@ -99,9 +117,15 @@ services:
     # making "admin-only" an in-app convenience instead of a real boundary. Accepted tradeoff:
     # no more direct localhost:3001 access for local debugging.
     environment:
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      # JWT auth (docs/planning/05-grafana-jwt-auth.md) — replaces anonymous-Viewer access.
+      - GF_AUTH_JWT_ENABLED=true
+      - GF_AUTH_JWT_HEADER_NAME=X-Grafana-JWT
+      - GF_AUTH_JWT_USERNAME_CLAIM=sub
+      - GF_AUTH_JWT_ROLE_ATTRIBUTE_PATH=role
+      - GF_AUTH_JWT_AUTO_SIGN_UP=true
+      - GF_AUTH_JWT_KEY_FILE=/etc/grafana/jwt/public.pem
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
       # Serving from the Gateway's /admin/grafana sub-path (see above) — Grafana needs to know its
@@ -119,9 +143,14 @@ services:
       - GF_SERVER_ROOT_URL=${PUBLIC_ORIGIN:-http://localhost:8000}/admin/grafana/
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
     depends_on:
-      - loki
-      - prometheus
-      - tempo
+      loki:
+        condition: service_started
+      prometheus:
+        condition: service_started
+      tempo:
+        condition: service_started
+      grafana-jwt-keygen:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - observability
@@ -139,3 +168,8 @@ networks:
     # attaches to it as `external: true, name: observability` so the app services can reach
     # otel-collector:4317. Renaming this breaks that join.
     name: observability
+
+volumes:
+  # Pinned name, same reasoning as the network above. See docs/planning/05-grafana-jwt-auth.md.
+  grafana-jwt-keys:
+    name: grafana-jwt-keys

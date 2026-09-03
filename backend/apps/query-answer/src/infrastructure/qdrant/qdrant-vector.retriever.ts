@@ -39,10 +39,15 @@ export class QdrantVectorRetriever implements IVectorRetriever {
     });
 
     return response.points.map((point) => {
-      const payload = point.payload as { text: string; url: string };
+      const payload = point.payload as {
+        text: string;
+        url: string;
+        chunk_index: number;
+      };
       return {
         text: payload.text,
         url: payload.url,
+        chunkIndex: payload.chunk_index,
         score: point.score,
       };
     });

@@ -3,4 +3,5 @@ export interface JobRequestsMessage {
   user_id: string;
   url: string;
   query: string;
+  depth: number;
 }

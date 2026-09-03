@@ -1,10 +1,15 @@
 import {
+  IsInt,
   IsNotEmpty,
+  IsOptional,
   IsString,
   IsUrl,
   Matches,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
+import { MAX_CRAWL_DEPTH } from '../../application/constants';
 
 // Mirrors frontend/src/utils/validation.js's getQueryError — this is the enforcement boundary
 // (the frontend check is only a UX convenience, easily skipped by calling POST /jobs directly), so
@@ -35,4 +40,10 @@ export class CreateJobRequestDto {
       'query must contain only English or Hebrew letters, numbers, and basic punctuation',
   })
   query!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_CRAWL_DEPTH)
+  depth?: number;
 }

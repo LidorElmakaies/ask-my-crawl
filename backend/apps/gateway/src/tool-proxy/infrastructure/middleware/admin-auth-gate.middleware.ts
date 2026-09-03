@@ -65,6 +65,9 @@ export class AdminAuthGateMiddleware implements NestMiddleware {
       });
     }
 
+    // See docs/planning/05-grafana-jwt-auth.md.
+    req.adminIdentity = identity;
+
     next();
   }
 

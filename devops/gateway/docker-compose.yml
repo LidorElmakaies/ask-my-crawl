@@ -20,9 +20,13 @@ services:
       # tool-proxy's admin-gated reverse-proxy targets (docs/planning/02-admin-dashboard-plan.md)
       - GRAFANA_URL=http://grafana:3000
       - KAFKA_UI_URL=http://kafka-ui:8080
+      # See docs/planning/05-grafana-jwt-auth.md.
+      - GRAFANA_JWT_PRIVATE_KEY_FILE=/etc/gateway/jwt/private.pem
       - OTEL_SERVICE_NAME=gateway
     ports:
       - "8000:8000"
+    volumes:
+      - grafana-jwt-keys:/etc/gateway/jwt:ro
     networks:
       - askmycrawl
       - observability

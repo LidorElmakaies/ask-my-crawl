@@ -56,3 +56,9 @@ networks:
   observability:
     external: true
     name: observability
+
+volumes:
+  # Owned by devops/observability/docker-compose.yml. See docs/planning/05-grafana-jwt-auth.md.
+  grafana-jwt-keys:
+    external: true
+    name: grafana-jwt-keys

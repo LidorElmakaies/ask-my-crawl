@@ -1,17 +1,10 @@
-/** One retrieved chunk, ready to fold into the LLM prompt. */
-export interface RetrievedChunk {
-  text: string;
-  url: string;
-  score: number;
-}
+import type { RetrievedChunk } from '../../models/retrieved-chunk';
 
-/**
- * Implemented by QdrantVectorRetriever (@qdrant/js-client-rest, read-only). Consumed by
- * AnsweringService. Unlike the Indexer's IVectorStore, this interface never writes — the
- * collection is guaranteed to already exist by the time crawl-complete fires.
- */
+export type { RetrievedChunk };
+
+/** Implemented by QdrantVectorRetriever. Consumed by AnsweringService — one of the two retrieval
+ * modalities fused via RRF, see ILexicalRetriever for the other. */
 export interface IVectorRetriever {
-  /** Top-K nearest chunks for this job only (job_id-scoped filter) — never leaks another job's
-   * pages into the prompt. */
+  /** Up to RETRIEVAL_TOP_K nearest chunks for this job (job_id-scoped), by cosine similarity. */
   search(vector: number[], jobId: string): Promise<RetrievedChunk[]>;
 }

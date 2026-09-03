@@ -14,7 +14,6 @@ import {
 } from '@app/testing';
 import {
   KAFKA_TOPICS,
-  MAX_CRAWL_DEPTH,
   type AnswerReadyMessage,
   type CrawlFrontierMessage,
   type JobCreatedMessage,
@@ -153,6 +152,7 @@ describe('Job Manager Service (e2e)', () => {
         user_id: randomUUID(),
         url: `https://example.com/${randomUUID()}`,
         query: 'what is this page about?',
+        depth: 5,
       };
 
       await producer.send({
@@ -184,7 +184,7 @@ describe('Job Manager Service (e2e)', () => {
         job_id: jobId,
         user_id: message.user_id,
         url: message.url,
-        depth: MAX_CRAWL_DEPTH,
+        depth: message.depth,
         query: message.query,
       });
       // Kafka contract conformance: exact key set matches CrawlFrontierMessage.
@@ -219,6 +219,7 @@ describe('Job Manager Service (e2e)', () => {
         user_id: randomUUID(),
         url: `https://example.com/${randomUUID()}`,
         query: 'another question',
+        depth: 5,
       };
       await producer.send({
         topic: KAFKA_TOPICS.JOB_REQUESTS,

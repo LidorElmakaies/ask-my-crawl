@@ -20,12 +20,18 @@ responds `202` immediately, with no `job_id` yet (Gateway doesn't have one to gi
   {
     "user_id": "uuid",
     "url": "https://example.com",   // Gateway does not normalize this — whatever consumes crawl-frontier does, on receipt
-    "query": "the user's question"
+    "query": "the user's question",
+    "depth": 10                     // 1..MAX_CRAWL_DEPTH — always a concrete, already-validated
+                                     // number by the time it reaches this topic (CreateJobRequestDto
+                                     // resolves the default and enforces the ceiling), never raw
+                                     // client input
   }
   ```
-  These exact 3 fields become the `jobs` row's `user_id`/`url`/`query` columns verbatim —
-  Job Manager Service adds only `id` (generated) and `result` (`NULL` at first). See
-  `data-model.md`'s `jobs` table.
+  `user_id`/`url`/`query` become the `jobs` row's columns verbatim — Job Manager Service adds only
+  `id` (generated) and `result` (`NULL` at first); see `data-model.md`'s `jobs` table. `depth`
+  is **not** persisted to that row — it's used once, as the starting value of the seed
+  `crawl-frontier` message's own `depth` field (see below), and then only lives on inside that
+  message chain as it counts down per hop.
 
 ## `crawl-frontier`
 
@@ -46,11 +52,13 @@ one topic (the seed producer and the Scraper both publish onto it).
     "job_id": "uuid",
     "user_id": "uuid",
     "url": "https://example.com/page",   // not yet normalized — the consumer normalizes on receipt
-    "depth": 3,                           // remaining-hops budget, NOT an absolute depth — starts at
-                                           // MAX_CRAWL_DEPTH (currently 3, see @app/kafka-contracts)
-                                           // on the seed message and counts DOWN by 1 per hop; the
-                                           // Scraper stops re-publishing once depth reaches 0
-                                           // (see data-model.md)
+    "depth": 10,                          // remaining-hops budget, NOT an absolute depth — starts at
+                                           // whatever job-requests carried (client-chosen, capped at
+                                           // MAX_CRAWL_DEPTH — currently 10, Gateway-only, see
+                                           // data-model.md — and defaulted to it when the client
+                                           // omits `depth`) on the seed message, and counts DOWN by
+                                           // 1 per hop; the Scraper stops re-publishing once depth
+                                           // reaches 0
     "query": "the user's original question",
     "base_url": "https://example.com"     // the job's seed URL — equals `url` on the seed message
                                            // itself, propagated through unchanged on every child

@@ -81,13 +81,26 @@ classes implement (consumed by Application). File naming: `<thing>.interface.ts`
 
 **Domain models are not interfaces — don't put them in an `interfaces/` folder.** `User`,
 `RefreshToken`, and anything else that's just "what a thing looks like" (no methods, nothing to
-implement) live in a top-level `models/` folder instead, sibling to `api/`/`application/`/
-`infrastructure/`. Rule: if it's an `I<Thing>` some class `implements`, it belongs in whichever
-layer's `interfaces/` that class lives in; if it's a plain data shape, it belongs in `models/`.
-`models/` has zero dependencies on any other layer (no framework imports — not even NestJS
-decorators) — every other layer is free to import from it. A pure transform over a model that
-introduces no framework/infra dependency (e.g. `toPublicUser()`) lives alongside the model it
-transforms, not in `application/`.
+implement) — plus domain error classes like `PermanentAnswerError` — live in a top-level `models/`
+folder instead, sibling to `api/`/`application/`/`infrastructure/`. Rule: if it's an `I<Thing>` some
+class `implements`, it belongs in whichever layer's `interfaces/` that class lives in; if it's a
+plain data shape or a domain error class, it belongs in `models/`. `models/` has zero dependencies
+on any other layer (no framework imports — not even NestJS decorators) — every other layer is free
+to import from it.
+
+**Pure helper functions — transforms, algorithms, formatting, anything with no framework/infra
+dependency — are not domain models either, and don't belong in `models/`.** They live in a sibling
+`utils/` folder instead. `models/` answers "what does this data look like" (or "what kind of error
+is this"); `utils/` answers "what do you do with it" — a function, not a shape. Both are equally
+framework-free, both are free for every layer to import from; the split exists purely so `models/`
+stays a quick, predictable place to find the app's data shapes, not a junk drawer of unrelated
+functions mixed in alongside them. Query/Answer Service's `utils/` (`bm25.ts`,
+`reciprocal-rank-fusion.ts`, `chunk-utils.ts`, `prompts.ts`) is the reference layout for this split —
+`models/retrieved-chunk.ts` holds only the `RetrievedChunk` shape, `utils/chunk-utils.ts` holds the
+functions that operate on it (`chunkKey`, `dedupeChunks`). Two files predate this split and still
+mix a function into `models/` — Auth Service's `models/user.ts` (`toPublicUser()`) and the Scraper's
+`models/url.ts` (`stripFragment`/`sameDomain`/`hostnameOf`/`sha256Hex`) — left as-is for now, not
+yet migrated to match.
 
 **Not every plain data shape is a domain model, though.** A use-case's request/response types
 (`RegisterInput`, `LoginInput`, `AuthTokens`, `AuthResult` in `auth-service.interface.ts`) are also

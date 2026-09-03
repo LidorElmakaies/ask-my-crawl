@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,6 +12,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../../src/components/GlowCard';
 import GradientButton from '../../../src/components/GradientButton';
 import InputField from '../../../src/components/InputField';
+import ScreenHeader from '../../../src/components/ScreenHeader';
 import SpaceBackground from '../../../src/components/SpaceBackground';
 import { useAppTheme } from '../../../src/hooks/useAppTheme';
 import {
@@ -56,6 +58,7 @@ function RolePicker({ value, onChange, colors }) {
 
 export default function AdminUsersScreen() {
   const dispatch = useDispatch();
+  const router = useRouter();
   const { colors } = useAppTheme();
   const { users, status, error } = useSelector((state) => state.admin);
   const currentUserId = useSelector((state) => state.auth.user?.id);
@@ -104,9 +107,10 @@ export default function AdminUsersScreen() {
   return (
     <SpaceBackground>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={[styles.heading, { color: colors.text }]}>
-          User Management
-        </Text>
+        <ScreenHeader
+          title="User Management"
+          onBack={() => router.replace('/admin')}
+        />
 
         {status === 'loading' && users.length === 0 && (
           <ActivityIndicator
@@ -301,12 +305,6 @@ const styles = StyleSheet.create({
   scroll: {
     padding: 24,
     gap: 16,
-  },
-  heading: {
-    fontSize: 26,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    marginBottom: 8,
   },
   loader: {
     marginTop: 40,

@@ -1,31 +1,37 @@
 import { useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useDispatch, useSelector } from 'react-redux';
 import GlowCard from '../../src/components/GlowCard';
 import GradientButton from '../../src/components/GradientButton';
 import InfoBox from '../../src/components/InfoBox';
+import InputField from '../../src/components/InputField';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import SelectField from '../../src/components/SelectField';
 import SpaceBackground from '../../src/components/SpaceBackground';
 import { useAppTheme } from '../../src/hooks/useAppTheme';
 import {
   clearJobsError,
   submitJobRequest,
 } from '../../src/store/slices/jobsSlice';
-import { getQueryError, MAX_QUERY_LENGTH } from '../../src/utils/validation';
+import {
+  getQueryError,
+  MAX_CRAWL_DEPTH,
+  MAX_QUERY_LENGTH,
+} from '../../src/utils/validation';
+
+const DEPTH_OPTIONS = [
+  { label: `Default (${MAX_CRAWL_DEPTH})`, value: undefined },
+  ...Array.from({ length: MAX_CRAWL_DEPTH }, (_, i) => ({
+    label: String(i + 1),
+    value: i + 1,
+  })),
+];
 
 export default function ScraperScreen() {
   const [input, setInput] = useState('');
   const [query, setQuery] = useState('');
-  const [focused, setFocused] = useState(false);
-  const [queryFocused, setQueryFocused] = useState(false);
+  const [depth, setDepth] = useState(undefined);
   const [submitted, setSubmitted] = useState(false);
   const router = useRouter();
   const dispatch = useDispatch();
@@ -39,7 +45,7 @@ export default function ScraperScreen() {
     if (!canSubmit) return;
     setSubmitted(false);
     const action = await dispatch(
-      submitJobRequest({ url: input.trim(), query: query.trim() }),
+      submitJobRequest({ url: input.trim(), query: query.trim(), depth }),
     );
     if (submitJobRequest.fulfilled.match(action)) {
       setSubmitted(true);
@@ -49,6 +55,7 @@ export default function ScraperScreen() {
   const handleClear = () => {
     setInput('');
     setQuery('');
+    setDepth(undefined);
     setSubmitted(false);
     dispatch(clearJobsError());
   };
@@ -65,99 +72,44 @@ export default function ScraperScreen() {
           style={styles.header}
         />
 
-        <GlowCard>
-          {/* Label */}
-          <Text style={[styles.label, { color: colors.textMuted }]}>
-            TARGET URL
-          </Text>
-
-          {/* Input */}
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: colors.inputBg,
-                borderColor: focused
-                  ? colors.inputFocusBorder
-                  : colors.inputBorder,
-                color: colors.text,
-                shadowColor: focused ? colors.primary : 'transparent',
-                shadowOpacity: 0.4,
-                shadowRadius: 8,
-                shadowOffset: { width: 0, height: 0 },
-              },
-            ]}
+        <GlowCard style={styles.fields}>
+          <InputField
+            label="TARGET URL"
             value={input}
             onChangeText={setInput}
             placeholder="https://example.com"
-            placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
+            monospace
+            glow
           />
 
-          {/* Label */}
-          <View style={styles.queryLabelRow}>
-            <Text style={[styles.label, { color: colors.textMuted }]}>
-              QUERY
-            </Text>
-            <Text
-              style={[
-                styles.charCount,
-                {
-                  color:
-                    query.length > MAX_QUERY_LENGTH
-                      ? colors.error
-                      : colors.textMuted,
-                },
-              ]}
-            >
-              {query.length}/{MAX_QUERY_LENGTH}
-            </Text>
-          </View>
-
-          {/* Input */}
-          <TextInput
-            style={[
-              styles.queryInput,
-              {
-                backgroundColor: colors.inputBg,
-                borderColor: queryError
-                  ? colors.error
-                  : queryFocused
-                    ? colors.inputFocusBorder
-                    : colors.inputBorder,
-                color: colors.text,
-                shadowColor: queryFocused ? colors.primary : 'transparent',
-                shadowOpacity: 0.4,
-                shadowRadius: 8,
-                shadowOffset: { width: 0, height: 0 },
-              },
-            ]}
+          <InputField
+            label="QUERY"
             value={query}
             onChangeText={setQuery}
             placeholder="What do you want to know about this page?"
-            placeholderTextColor={colors.textMuted}
             multiline
             maxLength={MAX_QUERY_LENGTH}
-            onFocus={() => setQueryFocused(true)}
-            onBlur={() => setQueryFocused(false)}
+            showCharCount
+            error={queryError}
+            glow
           />
-          {queryError ? (
-            <Text style={[styles.queryError, { color: colors.error }]}>
-              {queryError}
-            </Text>
-          ) : null}
 
-          {/* Button */}
+          <SelectField
+            label="MAX DEPTH (OPTIONAL)"
+            hint="How many hops of links to follow from the URL."
+            value={depth}
+            options={DEPTH_OPTIONS}
+            onChange={setDepth}
+          />
+
           <GradientButton
             label="Send Request"
             onPress={handleSubmit}
             loading={submitStatus === 'loading'}
             disabled={!canSubmit}
-            style={{ marginTop: 8 }}
           />
         </GlowCard>
 
@@ -217,46 +169,8 @@ const styles = StyleSheet.create({
   header: {
     marginBottom: 4,
   },
-  label: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-    marginBottom: 10,
-  },
-  queryLabelRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  charCount: {
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
-  queryError: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginTop: -10,
-    marginBottom: 16,
-  },
-  input: {
-    borderWidth: 1.5,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    marginBottom: 16,
-    fontFamily: 'monospace', // URL — monospace suits a raw address
-  },
-  queryInput: {
-    borderWidth: 1.5,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    marginBottom: 16,
-    minHeight: 80,
-    textAlignVertical: 'top', // Android: multiline text starts at the top, not vertically centered
+  fields: {
+    gap: 20,
   },
   feedback: {
     borderWidth: 1,

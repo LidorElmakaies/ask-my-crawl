@@ -13,7 +13,10 @@ export class ChatOpenAiClient implements ILlmClient {
     if (!baseURL) {
       throw new Error('LLM_BASE_URL is not configured');
     }
-    const model = config.get<string>('LLM_MODEL') ?? 'local-model';
+    const model = config.get<string>('LLM_MODEL');
+    if (!model) {
+      throw new Error('LLM_MODEL is not configured');
+    }
     this.client = new ChatOpenAI({
       model,
       apiKey: config.get<string>('LLM_API_KEY') ?? 'not-needed', // SDK requires a truthy string

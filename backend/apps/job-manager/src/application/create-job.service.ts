@@ -2,7 +2,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   KAFKA_TOPICS,
-  MAX_CRAWL_DEPTH,
   type CrawlFrontierMessage,
   type JobCreatedMessage,
   type JobRequestsMessage,
@@ -34,7 +33,7 @@ export class CreateJobService implements ICreateJobUseCase {
       job_id: job.id,
       user_id: job.user_id,
       url: job.url,
-      depth: MAX_CRAWL_DEPTH,
+      depth: input.depth,
       query: job.query,
       base_url: job.url,
     };

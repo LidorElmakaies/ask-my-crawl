@@ -25,7 +25,8 @@ app/
   (tabs)/
     _layout.js        # Custom animated tab bar — admin tab hidden unless authSlice.user.role is admin
     index.js          # Home / landing screen
-    scraper.js        # URL + question input → submitJob (fire-and-forget, no immediate result)
+    scraper.js        # URL + question + optional max-depth picker (SelectField, 1..MAX_CRAWL_DEPTH)
+                      # → submitJobRequest (fire-and-forget, no immediate result)
     history.js        # User's own jobs (GET /jobs + live job.created/job.completed WS updates) —
                        # loading/error/empty states, per-job status badge + question/answer boxes
     settings.js       # Theme toggle + connection status indicator
@@ -45,8 +46,14 @@ src/
     GradientButton.js # LinearGradient button with loading state
     InfoBox.js        # Labeled box variant (query/success/pending) — question/answer/pending
                        # sections on history.js
-    InputField.js     # Reusable labeled text input — use this, don't hand-roll TextInput
+    InputField.js     # Reusable labeled text input — use this, don't hand-roll TextInput.
+                      # label/value/onChangeText/placeholder/error, plus opt-in hint, showCharCount
+                      # (+ maxLength), multiline, monospace, glow (focus shadow), inputStyle
+                      # (size the input itself, e.g. a narrower numeric field)
     ScreenHeader.js   # Title + subtitle pair — every tab's header
+    SelectField.js    # Generic labeled dropdown — pill trigger + bottom-sheet modal list, same
+                      # mechanics as CountrySelect generalized to any `options: [{label, value}]`
+                      # (scraper.js's max-depth picker; use this before hand-rolling another picker)
     SpaceBackground.js# Animated dual-layer starfield background
     StatusBadge.js    # "Completed" / "In Progress" / "Failed" pill, driven by
                        # `status: 'pending' | 'completed' | 'failed'`
@@ -61,7 +68,9 @@ src/
     socketService.js   # Socket.IO client wrapper (connect/disconnect/isConnected)
     scraperService.js  # submitJob(url, query) → POST /jobs
     authService.js      # register/login/refresh/logout/me → /auth/*, /me
-    jobsService.js       # fetchJobs()/fetchJobById() → GET /jobs, /jobs/:id
+    jobsService.js       # fetchJobs() → GET /jobs; createJob({url, query, depth?}) → POST /jobs
+                         # (depth optional, 1..MAX_CRAWL_DEPTH — see src/utils/validation.js);
+                         # retryJob(jobId) → POST /jobs/:id/retry
     adminService.js      # list/get/update/delete user → /admin/users*
   store/
     index.js          # Store config: scraper + ws + admin (ephemeral), theme + auth (persisted);
@@ -69,8 +78,9 @@ src/
     slices/
       authSlice.js    # accessToken/refreshToken/user — store-managed only, no UI ever shows/edits it directly
       scraperSlice.js # Thunk → scraperService.submitJob, status/error (no result — see jobsSlice)
-      jobsSlice.js     # Thunk → jobsService.fetchJobs; also reduces job.created/job.completed WS
-                       # events (via wsSlice) into the same list — this is what history.js reads
+      jobsSlice.js     # Thunks → jobsService.fetchJobs/createJob(submitJobRequest)/retryJob; also
+                       # reduces job.created/job.completed WS events (via wsSlice) into the same
+                       # list — this is what history.js reads
       adminSlice.js    # Thunks → adminService, for the admin user-management screen
       themeSlice.js   # mode: null | 'light' | 'dark'
       wsSlice.js      # Thunks → socketService, status/lastMessage/error; dispatches into jobsSlice

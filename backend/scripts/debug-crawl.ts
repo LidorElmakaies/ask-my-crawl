@@ -12,7 +12,7 @@
 //
 // Usage (from backend/):
 //   npx ts-node -r tsconfig-paths/register scripts/debug-crawl.ts \
-//     --url https://example.com --user-id <uuid> [--query "..."] [--out ./debug-crawls] [--timeout 180]
+//     --url https://example.com --user-id <uuid> [--query "..."] [--depth N] [--out ./debug-crawls] [--timeout 180]
 //
 // The query sent on job-requests gets a `[debug-crawl:<nonce>]` tag prepended — that's what lets
 // this script find its own job-created message on a topic it didn't produce job_id on (Job Manager
@@ -36,6 +36,10 @@ import {
   type PageScrapedMessage,
 } from '@app/kafka-contracts';
 
+// This script talks to Kafka directly, bypassing the Gateway — so the Gateway's depth ceiling
+// doesn't apply here. Just a sane local default for this dev tool.
+const DEFAULT_DEBUG_CRAWL_DEPTH = 10;
+
 // --- tiny .env loader — no dotenv dependency in this project, and this script runs outside Nest's
 // own ConfigModule wiring, so it reads backend/.env itself (KEY=VALUE per line, `#` comments, same
 // file every app already reads).
@@ -58,6 +62,7 @@ interface Args {
   url: string;
   userId: string;
   query: string;
+  depth: number;
   outDir: string;
   timeoutSeconds: number;
   brokers: string[];
@@ -80,10 +85,17 @@ function parseArgs(argv: string[]): Args {
     process.exit(1);
   }
 
+  const depth = Number(get('--depth') ?? DEFAULT_DEBUG_CRAWL_DEPTH);
+  if (!Number.isInteger(depth) || depth < 1) {
+    console.error(`--depth must be a positive integer, got: ${depth}`);
+    process.exit(1);
+  }
+
   return {
     url,
     userId,
     query: get('--query') ?? 'debug crawl',
+    depth,
     outDir: resolve(get('--out') ?? join(__dirname, '../../debug-crawls')),
     timeoutSeconds: Number(get('--timeout') ?? '180'),
     brokers: (process.env.DEBUG_CRAWL_KAFKA_BROKERS ?? 'localhost:9092').split(','),
@@ -224,6 +236,7 @@ async function main(): Promise<void> {
     user_id: args.userId,
     url: args.url,
     query: taggedQuery,
+    depth: args.depth,
   };
   await producer.send({
     topic: KAFKA_TOPICS.JOB_REQUESTS,

@@ -1,11 +1,7 @@
 /* eslint-disable @typescript-eslint/unbound-method --
    false positive: these are jest.fn() mocks, not real prototype methods relying on `this`. */
 import { createHash } from 'crypto';
-import {
-  KAFKA_TOPICS,
-  MAX_CRAWL_DEPTH,
-  type JobRequestsMessage,
-} from '@app/kafka-contracts';
+import { KAFKA_TOPICS, type JobRequestsMessage } from '@app/kafka-contracts';
 import type { IEventPublisher } from '@app/kafka-client';
 import type { IJobRepository } from '../infrastructure/interfaces/job-repository.interface';
 import type { Job } from '../models/job';
@@ -44,6 +40,7 @@ describe('CreateJobService', () => {
     user_id: 'user-1',
     url: 'https://example.com/page',
     query: 'what is this page about?',
+    depth: 7,
   };
 
   it('creates the job row with exactly {user_id, url, query}', async () => {
@@ -77,7 +74,7 @@ describe('CreateJobService', () => {
         job_id: job.id,
         user_id: job.user_id,
         url: job.url,
-        depth: MAX_CRAWL_DEPTH,
+        depth: input.depth,
         query: job.query,
         base_url: job.url,
       },

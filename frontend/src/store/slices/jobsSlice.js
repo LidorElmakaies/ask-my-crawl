@@ -21,13 +21,13 @@ export const fetchJobs = createAsyncThunk(
 
 export const submitJobRequest = createAsyncThunk(
   'jobs/submitJobRequest',
-  async ({ url, query }, { getState, rejectWithValue }) => {
+  async ({ url, query, depth }, { getState, rejectWithValue }) => {
     try {
       const { accessToken } = getState().auth;
       if (!accessToken) {
         return rejectWithValue('No access token — cannot submit job.');
       }
-      return await jobsService.createJob(accessToken, { url, query });
+      return await jobsService.createJob(accessToken, { url, query, depth });
     } catch (err) {
       return rejectWithValue(err.message);
     }

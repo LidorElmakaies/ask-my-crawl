@@ -41,9 +41,13 @@ docs/planning/            Raw decision log — why things are the way they are
   Gateway checks the token/role locally first (fast-fail, no network call for an obviously bad
   request), then forwards to Auth Service and relays its response verbatim — a thin pass-through,
   not a translation layer, per `docs/specs/services.md`. **Plus** a third concern, `src/jobs-proxy/`
-  (`JwtAuthGuard`): `POST /jobs` publishes a `job-requests` Kafka message directly (no synchronous
-  call to Job Manager Service, no `job_id` in the `202` response) and `GET /jobs*` forwards to Job
-  Manager Service's internal HTTP API. `src/realtime/` also runs the `job-created`/`result-saved`
+  (`JwtAuthGuard`): `POST /jobs` accepts `{url, query, depth?}` — `depth` optional, integer
+  1..`MAX_CRAWL_DEPTH` (currently 10, defined only in `jobs-proxy/application/constants.ts` — no
+  other backend service sees or enforces this ceiling), defaulted to the ceiling when omitted, the
+  only server-side enforcement of that cap — and publishes a `job-requests` Kafka
+  message directly (no synchronous call to Job Manager Service, no `job_id` in the `202` response)
+  and `GET /jobs*` forwards to Job Manager Service's internal HTTP API. `src/realtime/` also runs
+  the `job-created`/`result-saved`
   Kafka consumers that relay each event onto the matching user's WebSocket connection as
   `job.created`/`job.completed`.
 - **Auth Service** (`backend/apps/auth`) — register/login/refresh/logout, `/me`, `/admin/users*`.

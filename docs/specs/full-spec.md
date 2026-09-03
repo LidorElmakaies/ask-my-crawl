@@ -91,8 +91,10 @@ cross-service table read/write. Full backend layering convention in §9.
 - **Responsibilities**: terminates HTTP + WebSocket; verifies JWTs locally, no network round-trip
   per request (§8); proxies `/auth/*`, `/me`, `/admin/users*` to Auth Service (thin relay, not a
   translation layer — the same request/response bodies Auth Service already validates and returns);
-  on `POST /jobs`, publishes a `job-requests` Kafka message and responds `202` immediately, no
-  synchronous call to Job Manager Service and no `job_id` yet; on `GET /jobs*`, calls Job Manager
+  on `POST /jobs`, validates `{url, query, depth?}` (`depth` optional, integer 1..`MAX_CRAWL_DEPTH`,
+  defaulted to the ceiling when omitted — the only server-side enforcement of that cap), publishes a
+  `job-requests` Kafka message and responds `202` immediately, no synchronous call to Job Manager
+  Service and no `job_id` yet; on `GET /jobs*`, calls Job Manager
   Service's internal HTTP API; maintains a `user_id → WebSocket` connection registry; consumes
   `job-created`/`result-saved`, relaying each to the matching connection as `job.created`/
   `job.completed`; gates and reverse-proxies `/admin/grafana`/`/admin/kafka-ui` for admins only.
@@ -116,8 +118,10 @@ The service that turns a `job-requests` message into a real, trackable job.
 
 - **Owns**: `jobs` — `id` (generated here, the only source of a `job_id`), `user_id`, `url`,
   `query`, `result` (`NULL` until answered), `failed_reason` (`NULL` unless Query/Answer gave up).
-- **Responsibilities**: consumes `job-requests`; inserts the `jobs` row; publishes the seed
-  `crawl-frontier` message (`depth: MAX_CRAWL_DEPTH`); publishes `job-created` so the Gateway can
+- **Responsibilities**: consumes `job-requests` (`depth` included, already resolved/validated by
+  the Gateway — not one of the columns above, see `data-model.md`); inserts the `jobs` row; publishes
+  the seed `crawl-frontier` message (`depth` carried straight through from job-requests); publishes
+  `job-created` so the Gateway can
   relay the real `job_id` over WebSocket; on `answer-ready`, writes `jobs.result` or
   `jobs.failed_reason` and publishes `result-saved`; serves `GET /jobs`/`GET /jobs/:id` for the
   Gateway's read proxy; on `POST /jobs/:id/retry`, clears `failed_reason` and republishes
@@ -196,14 +200,25 @@ mapping). The RAG step:
 
 - **Crawl Complete Consumer** — `@EventPattern('crawl-complete')`, calls `AnsweringService.handle()`
   directly.
-- **AnsweringService** — embeds the job's `query` (own scoped copy of the Indexer's embedding
-  client, same config, since query and document vectors must share one embedding space for cosine
-  similarity to mean anything), searches **Qdrant directly** for the top-k chunks filtered by
-  `job_id` (own scoped Qdrant read client — no new Indexer HTTP API, see §5), builds a system+user
-  RAG prompt (even the zero-chunks case still calls the LLM and says so plainly, no hand-rolled
-  canned answer), calls a config-driven OpenAI-compatible LLM client (`LLM_BASE_URL`/`LLM_MODEL`/
-  `LLM_API_KEY`, defaults to the same local LM Studio instance, swappable to a hosted provider with
-  no code change), publishes `answer-ready` with `answer_text` set.
+- **AnsweringService** — multi-query, dual-modality retrieval before the answer call (see
+  `docs/planning/04-retrieval-quality-plan.md` for the reproduced bug this responds to: a
+  single-phrasing, dense-only top-5 search missed the one chunk that literally answered the
+  question). (1) An `IQueryExpander` (own scoped LLM client) generates 2 diversified rewrites of the
+  job's `query` — one broader paraphrase, one that preserves the original's distinctive words
+  verbatim — and the original query itself is always kept as a third variant. (2) All 3 variants are
+  embedded in one batched call (own scoped copy of the Indexer's embedding client, same config) and
+  searched against Qdrant directly (dense/cosine, `job_id`-scoped) **and**, in parallel, searched via
+  in-process Okapi BM25 over the job's chunk set (fetched once via a `job_id`-scoped Qdrant scroll —
+  no separate search engine). (3) Reciprocal Rank Fusion combines the 3 dense-ranked lists into one
+  and, separately, the 3 lexical-ranked lists into another (rank-based, not raw-score-based, so
+  cosine similarity and BM25 scores combine validly) — each modality kept to its own top 5, merged
+  and deduped by (`url`, chunk index) into the final context, up to 10 chunks. This two-stage fusion
+  (per-modality, then merged) guarantees the final context always has candidates from both
+  strategies, rather than risking one dominating every rank. (4) Builds a system+user RAG prompt
+  from the fused chunk set (even the zero-chunks case still calls the LLM and says so plainly, no
+  hand-rolled canned answer), calls a config-driven OpenAI-compatible LLM client (`LLM_BASE_URL`/
+  `LLM_MODEL`/`LLM_API_KEY`, defaults to the same local LM Studio instance, swappable to a hosted
+  provider with no code change), publishes `answer-ready` with `answer_text` set.
 - **Retry, Kafka-native, not BullMQ**: a transient failure (embedding/Qdrant/LLM call)
   self-republishes `crawl-complete` with `retry_count` incremented, backoff `2s * 2^retry_count`
   capped at 30s. Past `ANSWER_MAX_RETRIES` (default 5), or immediately on a
@@ -213,8 +228,8 @@ mapping). The RAG step:
   `failed_urls` go unused — a failed URL was never indexed, so it can't affect retrieval either way;
   the answer is generated purely from whatever chunks actually exist in Qdrant for the `job_id`.
 - **Owns**: nothing in Postgres.
-- **Talks to**: Qdrant (read-only), an LLM (HTTP), Kafka (`crawl-complete` in and out,
-  `answer-ready` out).
+- **Talks to**: Qdrant (read-only, both similarity search and scroll), an LLM (HTTP, both query
+  expansion and the final answer), Kafka (`crawl-complete` in and out, `answer-ready` out).
 
 ### Notification Service — not implemented
 
@@ -292,8 +307,13 @@ CREATE INDEX ON jobs (user_id);
 
 Real gaps in this table, worth stating plainly:
 
-- **No max-depth column** — `MAX_CRAWL_DEPTH` (currently 3) is a fixed system constant in
-  `libs/kafka-contracts`, never per-job today.
+- **No max-depth column** — `depth` **is** client-provided and does vary per job (`POST /jobs`'s
+  optional `depth`, 1..`MAX_CRAWL_DEPTH`, defaulted to the ceiling when omitted), it's just never
+  persisted to this row — nothing downstream needs it after the seed `crawl-frontier` message is
+  published. `MAX_CRAWL_DEPTH` itself (currently 10, raised from the original product spec's 3) is
+  a fixed constant that lives **only** in the Gateway (`apps/gateway/src/jobs-proxy/application/
+  constants.ts`), not the shared `libs/kafka-contracts` — no other backend service can see or
+  depend on the ceiling — the ceiling `depth` is validated against, not the value actually used.
 - **No status column** — "done" is `result IS NOT NULL OR failed_reason IS NOT NULL`; no
   `crawling`/`answering` in-between state exists anywhere in Postgres.
 - **No timestamps, no error tracking** on this table.
@@ -379,10 +399,12 @@ correctness is Redis's job (§5), not Kafka ordering.
 
 Payload shapes:
 
-- **`job-requests`**: `{ user_id, url, query }` — becomes the `jobs` row verbatim, plus a generated
-  `id` and `NULL result`.
+- **`job-requests`**: `{ user_id, url, query, depth }` — `user_id`/`url`/`query` become the `jobs`
+  row verbatim, plus a generated `id` and `NULL result`; `depth` (1..`MAX_CRAWL_DEPTH`, resolved and
+  validated by the Gateway, defaulted to `MAX_CRAWL_DEPTH` when the client omits it) is not
+  persisted — only used as the seed `crawl-frontier` message's starting `depth`.
 - **`crawl-frontier`**: `{ job_id, user_id, url, depth, query, base_url }` — `depth` is a
-  remaining-hops budget (starts at `MAX_CRAWL_DEPTH`, counts down, stops re-publishing at 0);
+  remaining-hops budget (starts at whatever job-requests carried, counts down, stops re-publishing at 0);
   `query`/`base_url` are propagate-only fields set once by the seed and copied unchanged on every
   child.
 - **`job-created`**: `{ job_id, user_id, url, query }` — this is the *only* way the frontend learns
@@ -450,7 +472,7 @@ phone_number, telegram_chat_id }` — never includes hash/salt.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| POST | `/jobs` | `{ url, query }` | `202` → `{ status: "accepted" }` — **no `job_id`** (see `job.created` WS event below). `url` max 2048 chars; `query` max 500 chars, restricted to English/Hebrew letters, digits, and basic punctuation (`400` otherwise) — an allowlist chosen specifically to stop Unicode-smuggling prompt injection (invisible Unicode Tag characters riding on an emoji, zero-width/bidi tricks) from ever reaching the RAG prompt. Enforced by `CreateJobRequestDto` on the Gateway; mirrored in the frontend for as-you-type feedback only. |
+| POST | `/jobs` | `{ url, query, depth? }` | `202` → `{ status: "accepted" }` — **no `job_id`** (see `job.created` WS event below). `url` max 2048 chars; `query` max 500 chars, restricted to English/Hebrew letters, digits, and basic punctuation; `depth` optional, integer 1..`MAX_CRAWL_DEPTH` (currently 10) when given, defaulted to `MAX_CRAWL_DEPTH` when omitted (`400` on any violation) — the query charset is an allowlist chosen specifically to stop Unicode-smuggling prompt injection (invisible Unicode Tag characters riding on an emoji, zero-width/bidi tricks) from ever reaching the RAG prompt. Enforced by `CreateJobRequestDto` on the Gateway; mirrored in the frontend for as-you-type feedback only. |
 | GET | `/jobs` | — | User: own jobs only. Admin: all jobs, optional `?user_id=` filter. |
 | GET | `/jobs/:id` | — | User: `403` if not their own job. Admin: any job. `result` is `null` until answered. |
 | POST | `/jobs/:id/retry` | — | User: `403` if not theirs. `202` on success — clears `failed_reason`, republishes `crawl-complete` with a fresh retry budget, no re-crawl. `404` if the job doesn't exist, `409` if it has no `failed_reason` to retry. |
@@ -469,7 +491,13 @@ phone_number, telegram_chat_id }` — never includes hash/salt.
 
 Admin also gets two gated reverse-proxied tool UIs, neither a JSON API: `GET /admin/grafana*` and
 `GET /admin/kafka-ui*` — full-screen embedded dashboards (Grafana/Kafka UI respectively), gated by
-a query-param-token-upgrading-to-httpOnly-cookie scheme (§10 has the sequence).
+a query-param-token-upgrading-to-httpOnly-cookie scheme
+([docs/diagrams/admin-proxy-sequence.md](../diagrams/admin-proxy-sequence.md) has the sequence).
+Grafana additionally verifies a second, Grafana-scoped JWT the Gateway mints fresh on every
+proxied request (its own RS256 keypair, org role always `Admin`) — real per-admin auth rather than
+anonymous Viewer access, see
+[docs/planning/05-grafana-jwt-auth.md](../planning/05-grafana-jwt-auth.md). Kafka UI has no
+equivalent; it's reachable through the same gate with no further identity check on its own side.
 
 ### WebSocket (Socket.IO)
 
